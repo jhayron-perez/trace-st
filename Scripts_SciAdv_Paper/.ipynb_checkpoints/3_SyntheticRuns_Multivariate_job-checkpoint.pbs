@@ -1,0 +1,46 @@
+#!/bin/bash
+#PBS -N trace_hp_multi
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -m abe
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+
+set -euo pipefail
+
+module load conda
+conda activate castle
+
+WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper"
+cd "$WORKDIR"
+
+OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/multivariate_v4"
+SCRIPT="3_SyntheticRuns_Multivariate.py"
+LOGDIR="${OUTDIR}/logs"
+
+mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"
+mkdir -p "${TMPDIR}"
+
+echo "========== JOB INFO =========="
+echo "date: $(date)"
+echo "jobid: ${PBS_JOBID}"
+echo "host: $(hostname)"
+echo "workdir: ${WORKDIR}"
+echo "outdir: ${OUTDIR}"
+echo "tmpdir: ${TMPDIR}"
+echo "script: ${SCRIPT}"
+echo "=============================="
+
+python -u "${SCRIPT}" \
+  --outdir "${OUTDIR}" \
+  --n-trials 300 \
+  --ensemble-size 30 \
+  --n-workers 120 \
+  --flush-every 10 \
+  --seed 11 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+
+echo "Finished at: $(date)"

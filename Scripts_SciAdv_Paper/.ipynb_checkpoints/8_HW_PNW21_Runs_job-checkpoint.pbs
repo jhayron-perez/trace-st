@@ -1,0 +1,45 @@
+#!/bin/bash
+#PBS -N pnw21_hp
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -m abe
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+
+set -euo pipefail
+
+module load conda
+conda activate castle
+
+WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper"
+cd "$WORKDIR"
+
+OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/Results_HW_PNW21"
+SCRIPT="8_HW_PNW21_Runs.py"
+LOGDIR="${OUTDIR}/logs"
+
+mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"
+mkdir -p "${TMPDIR}"
+
+echo "========== JOB INFO =========="
+echo "date: $(date)"
+echo "jobid: ${PBS_JOBID}"
+echo "host: $(hostname)"
+echo "workdir: ${WORKDIR}"
+echo "outdir: ${OUTDIR}"
+echo "tmpdir: ${TMPDIR}"
+echo "=============================="
+
+python -u "${SCRIPT}" \
+  --outdir "${OUTDIR}" \
+  --n-trials 500 \
+  --n-members 100 \
+  --nproc 100 \
+  --start-method fork \
+  --continue-if-exists | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+
+echo "Finished at: $(date)"
