@@ -3,7 +3,7 @@
 This repository contains the code used in:
 
 **“Tracing the space–time causal origins of Earth system extremes”**  
-J. S. Pérez-Carrasquilla et al. (Science Advances, under review)
+J. S. Pérez-Carrasquilla et al. (To be submitted)
 
 ---
 
@@ -16,28 +16,7 @@ Understanding the causes of Earth system extremes is challenging due to:
 
 This repository implements **TraCE-ST (Tracer of Causal Evolutions in Space and Time)**, a data-driven framework designed to reconstruct event-conditioned causal pathways in multivariate spatiotemporal data.
 
-TraCE-ST moves beyond static causal graphs by producing **causal trajectories**, representing the sequence of spatial and cross-variable influences leading to an event.
-
----
-
-## Method Summary
-
-TraCE-ST combines:
-
-1. Local causal discovery (M-CaStLe)  
-2. Directional clustering (DBSCAN)  
-3. Lagrangian backtracking  
-4. Probabilistic ensemble framework  
-
-The output is an ensemble of causal trajectories, whose spatial density reflects the relative causal relevance of different regions and processes.
-
----
-
-## Repository Structure
-
-trace-st/
-├── trace_st/                  # Core implementation of TraCE-ST
-├── Scripts_SciAdv_Paper/      # Scripts used for experiments and figures in the paper
+TraCE-ST produces **causal trajectories**, representing the sequence of spatial and cross-variable influences leading to an event.
 
 ---
 
@@ -47,7 +26,7 @@ TraCE-ST is validated across:
 
 ### Synthetic experiments
 - Recovery of prescribed causal trajectories
-- Robustness across causal discovery methods and hyperparameters
+- Quantification of causal relevance of different variables
 
 ### Real-world case studies
 - Tropical Storm Debby (2006)
@@ -59,40 +38,13 @@ TraCE-ST is validated across:
 ## Installation
 
 git clone https://github.com/jhayron-perez/trace-st.git
-cd trace-st
 
-pip install -r requirements.txt
-
----
-
-## Usage
-
-Typical workflow:
-
-1. Prepare multivariate gridded data (e.g., xarray)
-2. Define:
-   - event location and time
-   - target variable
-   - spatial region and time window
-3. Run TraCE-ST to generate trajectories
-
-Example scripts are available in:
-Scripts_SciAdv_Paper/
-
----
-
-## Notes
-
-- Results depend on variable selection, resolution, and hyperparameters
-- TraCE-ST is intended as a hypothesis-generation tool
-
----
 
 ## Citation
 
 Pérez-Carrasquilla, J. S., et al.  
 Tracing the space–time causal origins of Earth system extremes.  
-To be submitted.
+To be submitted
 
 ---
 
@@ -104,6 +56,6 @@ MIT License
 
 ## Contact
 
-Jhayron S. Pérez-Carrasquilla  
+Jhayron S. Pérez-Carrasquilla  (jhayron@umd.edu)
 Department of Atmospheric and Oceanic Science  
 University of Maryland
