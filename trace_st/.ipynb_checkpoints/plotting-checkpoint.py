@@ -14,6 +14,7 @@ def plot_stencil(
     ax: matplotlib.pyplot.Axes = None,
     style: str = "color",
     monochrome_edge_color: str = "black",
+    cmap_edges: str = "seismic"
 ):
     """
     Plots a custom graph based on the provided stencil graph and value matrix.
@@ -71,7 +72,7 @@ def plot_stencil(
             val_matrix=stencil_val_matrix,
             link_label_fontsize=0.0,
             var_names=var_names,
-            cmap_edges='seismic',
+            cmap_edges=cmap_edges,
             node_pos=node_positions,
             show_colorbar=show_colorbar,
             link_colorbar_label="Cross-Dependence" if label_colorbars else None,
