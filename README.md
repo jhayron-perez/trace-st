@@ -4,7 +4,7 @@ TraCE-ST (**Tracer of Causal Evolutions in Space and Time**) reconstructs event-
 
 The framework is Lagrangian-inspired, but it does **not** trace physical parcels through a velocity field. Instead, it traces inferred causal influence: at every backward step, TraCE-ST estimates lagged dependencies in a moving space–time window, groups causal parents with coherent directions, selects a parent group, and moves the analysis region toward that group's inferred origin.
 
-This repository contains the Python implementation, a self-contained tutorial, and the analysis workflows accompanying the manuscript:
+This repository contains the Python implementation, introductory synthetic and real-data tutorials, and the analysis workflows accompanying the manuscript:
 
 > J. S. Pérez-Carrasquilla et al., *Tracing the space-time causal origins of Earth system extremes* (manuscript in preparation).
 
@@ -95,15 +95,25 @@ DYNOTEARS support is optional because it requires `causalnex`:
 python -m pip install -e ".[dynotears]"
 ```
 
-## Start with the tutorial
+## Start with the tutorials
 
-Launch Jupyter from the repository root and open [`Tutorials/1_Synthetic_Tutorial.ipynb`](Tutorials/1_Synthetic_Tutorial.ipynb):
+Launch Jupyter from the repository root. The synthetic tutorial is the recommended introduction:
 
 ```bash
 jupyter lab Tutorials/1_Synthetic_Tutorial.ipynb
 ```
 
-The notebook is self-contained. It constructs the manuscript's three-variable controlled experiment, in which moving anomalies in variables `A` and `C` contribute at a known one-step lag to the target variable `B`. It then reconstructs a deterministic backward trajectory, compares it with the prescribed paths, and runs a fixed-parameter probabilistic Monte Carlo ensemble to sample competing pathways.
+[`1_Synthetic_Tutorial.ipynb`](Tutorials/1_Synthetic_Tutorial.ipynb) is self-contained. It constructs the manuscript's three-variable controlled experiment, in which moving anomalies in variables `A` and `C` contribute at a known one-step lag to the target variable `B`. It then reconstructs a deterministic backward trajectory, compares it with the prescribed paths, and runs a fixed-parameter probabilistic Monte Carlo ensemble to sample competing pathways.
+
+The real-data tutorial applies the same workflow to the 2021 Pacific Northwest heatwave:
+
+```bash
+jupyter lab Tutorials/2_PNW21_Real_Data_Tutorial.ipynb
+```
+
+[`2_PNW21_Real_Data_Tutorial.ipynb`](Tutorials/2_PNW21_Real_Data_Tutorial.ipynb) starts from the Z500 anomaly near 52.5°N, 120°W on 30 June 2021 and traces causal-parent pathways backward through Z500, outgoing longwave radiation (OLR), and total-column water vapor (TCWV). It visualizes the event fields, deterministic trajectory, first-step causal stencils and selected displacement, and a small fixed-parameter Monte Carlo ensemble. The required analysis-ready input, [`trace_st_pnw21_processed.nc`](Tutorials/trace_st_pnw21_processed.nc), is included.
+
+This reduced three-variable example is designed for interpretation and manageable execution. The manuscript experiment additionally includes Z10 and surface latent- and sensible-heat fluxes, so tutorial results are conditional on the three included variables and should not be treated as an exact reproduction of the full paper analysis.
 
 ## Minimal library use
 
@@ -158,7 +168,8 @@ Choose these values from the temporal resolution, grid spacing, propagation spee
 ```text
 trace_st/                  Core package: data preparation, causal stencils,
                            parent clustering, movement, and trajectory driver
-Tutorials/                 Self-contained introductory notebook
+Tutorials/                 Synthetic and real-data introductory notebooks,
+                           including the processed three-variable PNW21 input
 Scripts_Paper/             Synthetic and case-study analysis workflows used
                            for the manuscript figures
 environment.yml            Reproducible Conda environment
