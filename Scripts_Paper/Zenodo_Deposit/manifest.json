@@ -1,0 +1,161 @@
+{
+  "deposit_title": "TraCE-ST processed data and trajectory ensembles",
+  "manuscript_title": "Tracing the space-time causal origins of Earth system extremes",
+  "version": "1.0.0",
+  "repository": "https://github.com/jhayron-perez/trace-st",
+  "contact": {
+    "name": "Jhayron S. Perez-Carrasquilla",
+    "email": "jhayron@umd.edu; jspecar@gmail.com"
+  },
+  "conventions": {
+    "input_dimensions": [
+      "time",
+      "var",
+      "lat",
+      "lon"
+    ],
+    "longitude": "degrees east on [0, 360)",
+    "input_dtype": "float32",
+    "trajectory_center_order": [
+      "lat",
+      "lon"
+    ],
+    "parent_indices": "one-based indices into the NetCDF var coordinate"
+  },
+  "collections": {
+    "real_world_inputs": {
+      "description": "Analysis-ready gridded inputs required to rerun the three real-world TraCE-ST cases.",
+      "artifacts": [
+        "trace_st_debby_processed.nc",
+        "trace_st_pinatubo_processed.nc",
+        "trace_st_pnw21_processed.nc",
+        "manifest.json"
+      ],
+      "cases": {
+        "debby": {
+          "target": "precip",
+          "target_time": "2006-08-26T00:00:00",
+          "target_lat": 28.0,
+          "target_lon_0360": 314.0,
+          "timeres": "1h",
+          "variables": [
+            "Tb",
+            "vo",
+            "precip"
+          ]
+        },
+        "pinatubo": {
+          "target": "AEROD_v",
+          "target_time": "1991-07-02T00:00:00",
+          "target_lat": 15.0,
+          "target_lon_0360": 200.0,
+          "timeres": "1d",
+          "variables": [
+            "TMSO201",
+            "BURDENSO401",
+            "TMH2SO401",
+            "AEROD_v"
+          ]
+        },
+        "pnw21": {
+          "target": "Z500",
+          "target_time": "2021-06-30T00:00:00",
+          "target_lat": 52.5,
+          "target_lon_0360": 240.0,
+          "timeres": "1d",
+          "variables": [
+            "Z500",
+            "Z10",
+            "MTNLWRF",
+            "TCWV",
+            "MSLHF",
+            "MSSHF"
+          ]
+        }
+      }
+    },
+    "results_debby": {
+      "description": "Debby hyperparameter summaries, member diagnostics, and retained trajectory bundles.",
+      "expected_artifacts": [
+        "results_jobs_final.csv",
+        "results_members_final.csv",
+        "run_metadata.json",
+        "run_summary.json",
+        "bundles/*.npz",
+        "bundles/*.json"
+      ],
+      "supports": [
+        "main Debby trajectory and density figure",
+        "storm-track-distance diagnostics",
+        "lead-time-resolved causal relevance",
+        "supplementary ensemble examples"
+      ]
+    },
+    "results_pinatubo": {
+      "description": "Pinatubo hyperparameter summaries, member diagnostics, and retained trajectory bundles.",
+      "expected_artifacts": [
+        "results_jobs_final.csv",
+        "results_members_final.csv",
+        "run_metadata.json",
+        "run_summary.json",
+        "bundles/*.npz",
+        "bundles/*.json"
+      ],
+      "supports": [
+        "main Pinatubo trajectory and density figure",
+        "endpoint-distance-to-volcano diagnostics",
+        "lead-time-resolved causal relevance",
+        "supplementary ensemble examples"
+      ]
+    },
+    "results_pnw21": {
+      "description": "PNW hyperparameter summary and retained run-level trajectory ensembles.",
+      "expected_artifacts": [
+        "hyperparam_search_summary.csv",
+        "run_*/params.json",
+        "run_*/summary.json",
+        "run_*/ensemble_results.pkl"
+      ],
+      "supports": [
+        "PNW representative trajectories",
+        "pooled variable-specific density",
+        "lead-time-resolved causal relevance",
+        "physical-pattern composites",
+        "supplementary ensemble examples"
+      ]
+    },
+    "results_synth1": {
+      "description": "Controlled two-variable reconstruction and backend-comparison results.",
+      "expected_artifacts": [
+        "results_jobs_final.csv",
+        "results_tracks_final.csv",
+        "run_metadata.json",
+        "run_summary.json"
+      ],
+      "input_generation": "Generated deterministically by Scripts_Paper/1_SyntheticRuns_Univariate.py"
+    },
+    "results_synth2": {
+      "description": "Controlled three-variable causal-mixture results across supported discovery backends.",
+      "expected_artifacts": [
+        "results_jobs_final.csv",
+        "results_alphas_final.csv",
+        "results_members_final.csv",
+        "run_metadata.json",
+        "run_summary.json",
+        "bundles/*.npz",
+        "bundles/*.json"
+      ],
+      "input_generation": "Generated deterministically by Scripts_Paper/3_SyntheticRuns_Multivariate.py and Scripts_Paper/3_SyntheticRuns_Multivariate_PCMCI_Dyno.py"
+    }
+  },
+  "excluded_operational_files": [
+    "results_*.jsonl",
+    "results_*_snapshot.csv",
+    ".ipynb_checkpoints/"
+  ],
+  "integrity": {
+    "file_level_checksums": "Zenodo-generated checksums apply to uploaded files. The real_world_inputs exporter additionally creates SHA-256 hashes in its local manifest.json.",
+    "invented_checksums": false
+  },
+  "doi": null
+}
