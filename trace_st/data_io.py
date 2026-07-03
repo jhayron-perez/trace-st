@@ -1,4 +1,3 @@
-# NOTE: Auto-organized from original CausalBTs.py and mcastle_utils_vBT.py
 import numpy as np
 import xarray as xr
 import pandas as pd
