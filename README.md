@@ -6,7 +6,7 @@ The framework is Lagrangian-inspired, but it does **not** trace physical parcels
 
 This repository contains the Python implementation, introductory synthetic and real-data tutorials, and the analysis workflows accompanying the manuscript:
 
-> J. S. Pérez-Carrasquilla et al., *Tracing the space-time causal origins of Earth system extremes* (manuscript in preparation).
+> Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). *Tracing the space-time causal origins of Earth system extremes*.
 
 ## Why TraCE-ST?
 
@@ -192,32 +192,13 @@ pyproject.toml              Package metadata and pip dependencies
 
 The case-study workflows require their corresponding scientific datasets and, for cluster-scale runs, may use the included PBS job scripts. The controlled synthetic datasets can be generated directly from the repository code.
 
-## Reproducing manuscript analyses
-
-Scripts are numbered by analysis stage in `Scripts_Paper/`. Run them from the repository root after activating the environment. For example:
-
-```bash
-python Scripts_Paper/3_SyntheticRuns_Multivariate.py --help
-```
-
-The directory also contains notebooks used to analyze stored trajectory ensembles and produce manuscript figures. Large real-world workflows are research pipelines rather than lightweight examples; inspect their data paths and scheduler settings before execution.
-
-The dependencies declared in `pyproject.toml`, `requirements.txt`, and `environment.yml` support the TraCE-ST package and included tutorials. The manuscript scripts are research workflows and may additionally require plotting, document-processing, scheduler, and system-level tools. In particular, the analysis notebooks use `cartopy`, and parts of the figure workflow use `pypdf`. Install these confirmed Python extras when reproducing those analyses:
-
-```bash
-conda install -c conda-forge cartopy
-python -m pip install pypdf
-```
-
-Some manuscript workflows also expect external scientific datasets, configured filesystem paths, and HPC/PBS resources. These paper-specific requirements are intentionally not part of the core package dependencies because they are unnecessary for using TraCE-ST or running the tutorials.
-
 ## Citation
 
 The manuscript is still in preparation. Until a DOI and final bibliographic record are available, cite the repository and the draft title:
 
 ```text
-Pérez-Carrasquilla, J. S., et al. Tracing the space–time causal origins
-of Earth system extremes. Manuscript in preparation.
+Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). *Tracing the space-time causal origins of Earth system extremes*.
+
 https://github.com/jhayron-perez/trace-st
 ```
 
