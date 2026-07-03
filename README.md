@@ -34,7 +34,7 @@ The manuscript evaluates the method hierarchically, from controlled systems with
 
 The framework supports Elastic-Net Granger, PCMCI, and optional DYNOTEARS causal-discovery backends. The manuscript finds that the qualitative synthetic pathways can be recovered with all three under suitable parameter choices, while their accuracy, robustness, and computational cost differ.
 
-## M-CaStLe foundation and attribution
+## M-CaStLe foundation
 
 TraCE-ST builds its local causal graphs with **M-CaStLe**, a generalization of the original **CaStLe** framework. CaStLe introduced local stencil learning for space–time causal discovery by constraining candidate parents to a fixed neighborhood and pooling spatial replicates under approximate locality and stationarity assumptions. M-CaStLe extends that construction from univariate fields to multivariate systems, jointly representing within-variable and cross-variable causal structure while retaining the sample-efficiency and grid-level interpretability of CaStLe.
 
