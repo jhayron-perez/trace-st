@@ -86,8 +86,10 @@ pip install -e .
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[tutorials]"
 ```
+
+The `tutorials` extra installs JupyterLab in addition to the TraCE-ST runtime dependencies. If notebooks are not needed, `python -m pip install -e .` installs only the core package requirements. The Conda environment includes JupyterLab by default.
 
 DYNOTEARS support is optional because it requires `causalnex`:
 
@@ -187,6 +189,15 @@ python Scripts_Paper/3_SyntheticRuns_Multivariate.py --help
 ```
 
 The directory also contains notebooks used to analyze stored trajectory ensembles and produce manuscript figures. Large real-world workflows are research pipelines rather than lightweight examples; inspect their data paths and scheduler settings before execution.
+
+The dependencies declared in `pyproject.toml`, `requirements.txt`, and `environment.yml` support the TraCE-ST package and included tutorials. The manuscript scripts are research workflows and may additionally require plotting, document-processing, scheduler, and system-level tools. In particular, the analysis notebooks use `cartopy`, and parts of the figure workflow use `pypdf`. Install these confirmed Python extras when reproducing those analyses:
+
+```bash
+conda install -c conda-forge cartopy
+python -m pip install pypdf
+```
+
+Some manuscript workflows also expect external scientific datasets, configured filesystem paths, and HPC/PBS resources. These paper-specific requirements are intentionally not part of the core package dependencies because they are unnecessary for using TraCE-ST or running the tutorials.
 
 ## Citation
 

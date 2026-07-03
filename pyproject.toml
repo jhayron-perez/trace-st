@@ -26,6 +26,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tutorials = [
+    "jupyterlab>=4.0",
+]
 dynotears = [
     "causalnex>=0.13",
 ]

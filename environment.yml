@@ -12,3 +12,4 @@ dependencies:
   - netcdf4
   - h5netcdf
   - tigramite
+  - jupyterlab
