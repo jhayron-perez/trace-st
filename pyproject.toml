@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trace-st"
+version = "0.1.0"
+description = "TraCE-ST: Tracing the Space–Time Causal Origins of Earth System Extremes"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Jhayron S. Pérez-Carrasquilla", email = "jhayron@umd.edu"},
+]
+keywords = ["causal discovery", "spatiotemporal", "earth system", "climate extremes"]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.25",
+    "pandas>=2.0",
+    "xarray>=2023.11",
+    "matplotlib>=3.7",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "tigramite>=1.6",
+    "netCDF4>=1.6",
+    "h5netcdf>=1.2",
+]
+
+[project.optional-dependencies]
+dynotears = [
+    "causalnex>=0.13",
+]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "flake8>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jhayron-perez/trace-st"
+Repository = "https://github.com/jhayron-perez/trace-st.git"
+Issues = "https://github.com/jhayron-perez/trace-st/issues"
+
+[tool.setuptools]
+packages = ["trace_st"]
+
+[tool.setuptools.package-data]
+trace_st = ["*.py"]

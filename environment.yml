@@ -1,0 +1,14 @@
+name: trace-st
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - xarray
+  - matplotlib
+  - scipy
+  - scikit-learn
+  - netcdf4
+  - h5netcdf
+  - tigramite
