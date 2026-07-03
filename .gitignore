@@ -8,6 +8,3 @@ __pycache__/
 env/
 venv/
 *.egg-info/
-
-# Publication data products are uploaded to Zenodo, not GitHub.
-Scripts_Paper/zenodo_real_world_inputs/
