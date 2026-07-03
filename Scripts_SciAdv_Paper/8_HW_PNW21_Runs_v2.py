@@ -1,3 +1,13 @@
+# Manuscript workflow: causal evolution of the 2021 Pacific Northwest heatwave.
+#
+# TraCE-ST starts from the 500-hPa geopotential-height target near 52.5 N,
+# 120 W at the event peak and traces daily causal influence backward through
+# circulation, convection, moisture, and surface-energy variables. The script
+# generates trajectory ensembles and variable-specific density summaries used
+# to examine large-scale precursors and land/ocean surface-flux pathways.
+# Monte Carlo member spread and sensitivity across physically admissible
+# parameter configurations are treated as distinct sources of uncertainty.
+
 from __future__ import annotations
 
 import os
@@ -39,7 +49,7 @@ GLOBAL_SEED = 11
 SEARCH_SEED = 11
 
 # -----------------------------------------------------------------------------
-# Paths / constants
+# Input path, event target, variables, and analysis scales
 # -----------------------------------------------------------------------------
 PATH_FILES = "/glade/derecho/scratch/jhayron/DataCaStLeBTs/JointFiles/"
 TIME_SLICE = ("2021-05-20", "2021-06-30")
@@ -70,7 +80,7 @@ VAR_COMBOS: List[List[str]] = [
 ]
 
 # -----------------------------------------------------------------------------
-# Loading
+# Load, align, and regrid the selected anomaly fields
 # -----------------------------------------------------------------------------
 def load_full_data_for_vars(varstems: List[str]) -> xr.DataArray:
     list_names = [VAR_NAME_MAP[v] for v in varstems]
@@ -152,8 +162,9 @@ def build_case_pnw(var_combo: List[str] | None = None) -> dict:
 
 # -----------------------------------------------------------------------------
 # Search space
-# Keep consistent with prior cases, but sensible for daily 2.5° data.
-# Do not drift too far from your working notebook ranges.
+# Ranges reflect daily data, the selected grid, and physically admissible
+# propagation scales; they are sensitivity domains rather than optimization
+# guarantees.
 # -----------------------------------------------------------------------------
 SEARCH_SPACE_SHARED_PNW = dict(
     timewindow=["4d", "5d", "6d"],
@@ -267,7 +278,7 @@ def build_params_from_trial_pnw(trial: dict, case: dict) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# Run helpers
+# Single-member and ensemble trajectory execution
 # -----------------------------------------------------------------------------
 def run_one_track(full_data, params, date_end):
     """
@@ -348,7 +359,7 @@ def run_ensemble_tracks(
 
 
 # -----------------------------------------------------------------------------
-# Density / window helpers
+# Variable-specific trajectory density over selected lead-time windows
 # -----------------------------------------------------------------------------
 def density_by_variable_for_time_window_boxes(
     centers_ens,
@@ -413,7 +424,7 @@ def density_by_variable_for_time_window_boxes(
 
 
 # -----------------------------------------------------------------------------
-# Geometry helpers
+# Great-circle pathway-length and displacement diagnostics
 # -----------------------------------------------------------------------------
 def haversine_km(lat1, lon1, lat2, lon2):
     """
@@ -481,7 +492,7 @@ def net_displacement_start_to_end_km(centers):
 
 
 # -----------------------------------------------------------------------------
-# Summary helpers
+# Ensemble contributions, densities, completion, and geometry
 # -----------------------------------------------------------------------------
 def summarize_ensemble_results(
     ensemble_results_all,
@@ -700,7 +711,7 @@ def summarize_ensemble_results(
 
 
 # -----------------------------------------------------------------------------
-# JSON / saving helpers
+# Atomic serialization for long high-performance-computing runs
 # -----------------------------------------------------------------------------
 def make_jsonable(obj):
     """
@@ -778,7 +789,7 @@ def save_run_outputs(
 
 
 # -----------------------------------------------------------------------------
-# Flatten summary for master table
+# Compact trial-level table used for configuration screening
 # -----------------------------------------------------------------------------
 def flatten_summary_for_table(summary):
     """
@@ -853,7 +864,7 @@ def flatten_summary_for_table(summary):
 
 
 # -----------------------------------------------------------------------------
-# Main hyperparameter search loop
+# Parameter-sensitivity loop; each configuration contains trajectory members
 # -----------------------------------------------------------------------------
 def run_hyperparam_ensemble_search(
     *,
@@ -934,7 +945,7 @@ def run_hyperparam_ensemble_search(
 
 
 # -----------------------------------------------------------------------------
-# Main
+# Command-line orchestration
 # -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(

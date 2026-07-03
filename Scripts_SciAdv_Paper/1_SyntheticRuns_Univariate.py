@@ -1,3 +1,14 @@
+# Manuscript workflow: controlled two-variable causal-trajectory experiment.
+#
+# A coherent Gaussian anomaly follows a prescribed path in V1. V2 depends on
+# lagged V1 and is therefore correlated with it, but V2 is not a causal parent
+# of V1. Starting from the V1 event at t0, this script evaluates whether
+# TraCE-ST reconstructs the known V1 pathway without switching spuriously to
+# V2. Elastic-Net Granger, PCMCI, and DYNOTEARS are evaluated over their
+# respective hyperparameter spaces. Geometry and parent-selection diagnostics
+# are written incrementally so interrupted high-performance-computing searches
+# can be resumed safely.
+
 from __future__ import annotations
 
 import os
@@ -48,7 +59,7 @@ GLOBAL_SEED = 11
 SEARCH_SEED = 11
 
 # -----------------------------------------------------------------------------
-# Synthetic data helpers
+# Controlled fields and prescribed trajectories
 # -----------------------------------------------------------------------------
 def gaussian_blob(y2d, x2d, y0, x0, sig_y=6.0, sig_x=10.0, amp=1.0):
     dy = y2d - float(y0)
@@ -229,7 +240,7 @@ def build_synthetic_case():
 
 
 # -----------------------------------------------------------------------------
-# Base params
+# Baseline TraCE-ST configurations for each causal-discovery engine
 # -----------------------------------------------------------------------------
 def build_base_params():
     box_size = 20
@@ -350,7 +361,7 @@ def build_base_params():
 
 
 # -----------------------------------------------------------------------------
-# Search space
+# Physically and computationally admissible search domains
 # -----------------------------------------------------------------------------
 SEARCH_SPACE_SHARED = dict(
     timewindow=["2d", "3d", "4d"],
@@ -433,7 +444,7 @@ def build_jobs(n_per_method=1000, seed=123):
 
 
 # -----------------------------------------------------------------------------
-# Evaluation helpers
+# Reconstruction metrics against the prescribed V1 pathway
 # -----------------------------------------------------------------------------
 def build_cond_ind_test(name):
     if name == "parcorr":
@@ -545,7 +556,7 @@ def summarize_track(centers, parents, truth, target_len=31):
 
 
 # -----------------------------------------------------------------------------
-# Safe IO / resume helpers
+# Incremental output and restart support for long searches
 # -----------------------------------------------------------------------------
 def append_jsonl(path: Path, records):
     if not records:
@@ -611,7 +622,7 @@ def filter_pending_jobs(all_jobs, completed_keys):
 
 
 # -----------------------------------------------------------------------------
-# Worker
+# One independent hyperparameter evaluation
 # -----------------------------------------------------------------------------
 def evaluate_job(job):
     method, trial_id, trial = job
@@ -770,7 +781,7 @@ def evaluate_job(job):
 
 
 # -----------------------------------------------------------------------------
-# Main
+# Command-line orchestration and multiprocessing
 # -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="Trace-ST synthetic hyperparameter search")

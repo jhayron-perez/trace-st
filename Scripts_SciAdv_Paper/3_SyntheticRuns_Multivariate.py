@@ -1,3 +1,15 @@
+# Manuscript workflow: controlled three-variable causal-mixture experiment.
+#
+# Independent coherent anomalies propagate in V1 and V3 before jointly
+# generating the target V2 during the final event-development period. The
+# prescribed alpha_mix values define the known relative contributions of V1
+# and V3. This script runs fixed-parameter Monte Carlo trajectory ensembles
+# with the Elastic-Net Granger M-CaStLe backend, summarizes variable-specific
+# trajectory density and geometry, and tests whether recovered contribution
+# diagnostics vary consistently with the prescribed mixture. Hyperparameter
+# configurations are evaluated across every alpha_mix value so comparisons are
+# made under a common model specification.
+
 from __future__ import annotations
 
 import os
@@ -43,12 +55,12 @@ GLOBAL_SEED = 11
 SEARCH_SEED = 11
 
 # -----------------------------------------------------------------------------
-# Global config
+# Prescribed causal-mixture strengths evaluated in the manuscript
 # -----------------------------------------------------------------------------
 ALPHA_MIX_GRID = [0.2, 0.4, 0.6, 0.8]
 
 # -----------------------------------------------------------------------------
-# Synthetic helpers
+# Controlled fields, prescribed paths, and lagged response construction
 # -----------------------------------------------------------------------------
 def gaussian_blob(y2d, x2d, y0, x0, sig_y=6.0, sig_x=10.0, amp=1.0):
     dy = y2d - float(y0)
@@ -245,7 +257,7 @@ def build_multivariate_case(
 
 
 # -----------------------------------------------------------------------------
-# Base params
+# Baseline probabilistic TraCE-ST configuration
 # -----------------------------------------------------------------------------
 def build_base_params_multivar():
     return dict(
@@ -285,7 +297,7 @@ def build_base_params_multivar():
 
 
 # -----------------------------------------------------------------------------
-# Search space
+# Admissible TraCE-ST and Elastic-Net parameter domains
 # -----------------------------------------------------------------------------
 SEARCH_SPACE_SHARED = dict(
     timewindow=["5d","6d","7d"],#
@@ -346,7 +358,7 @@ def build_multivar_jobs(n_trials, seed=SEARCH_SEED):
 
 
 # -----------------------------------------------------------------------------
-# Run helpers
+# Single-trajectory and fixed-parameter Monte Carlo ensemble execution
 # -----------------------------------------------------------------------------
 def run_one_track(full_data, params, date_end):
     out = tst.trajectory.run_track(
@@ -434,7 +446,7 @@ def build_params_from_trial_multivar(trial):
 
 
 # -----------------------------------------------------------------------------
-# Summary helpers
+# Spatial density, parent contribution, and pathway-geometry diagnostics
 # -----------------------------------------------------------------------------
 def _accumulate_density_box(density, xs, ys, centers, box_size):
     centers = np.asarray(centers, dtype=float)
@@ -813,7 +825,7 @@ def _safe_intercept(x, y):
 
 
 # -----------------------------------------------------------------------------
-# Search evaluation
+# Physical plausibility and ensemble-completion criteria
 # -----------------------------------------------------------------------------
 def evaluate_physical_validity(
     summary,
@@ -855,7 +867,7 @@ def evaluate_physical_validity(
 
 
 # -----------------------------------------------------------------------------
-# Safe IO / resume helpers
+# Incremental output and restart support for long searches
 # -----------------------------------------------------------------------------
 def append_jsonl(path: Path, records):
     if not records:
@@ -919,7 +931,7 @@ def filter_pending_trials(all_jobs, completed_ids):
 
 
 # -----------------------------------------------------------------------------
-# Bundle serialization
+# Full ensemble artifacts used by downstream manuscript analysis
 # -----------------------------------------------------------------------------
 def _bundle_stem(trial_id, alpha_mix):
     alpha_tag = str(alpha_mix).replace(".", "p")
@@ -1024,7 +1036,7 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 
 
 # -----------------------------------------------------------------------------
-# Trial evaluation
+# Evaluate one configuration across all prescribed mixture strengths
 # -----------------------------------------------------------------------------
 def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED):
     params = build_params_from_trial_multivar(trial)
@@ -1149,7 +1161,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
 
 
 # -----------------------------------------------------------------------------
-# Worker
+# Multiprocessing wrapper for one hyperparameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED):
     trial_id, trial = job
@@ -1237,7 +1249,7 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED
 
 
 # -----------------------------------------------------------------------------
-# Main
+# Command-line orchestration and multiprocessing
 # -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="Trace-ST multivariate synthetic hyperparameter search")

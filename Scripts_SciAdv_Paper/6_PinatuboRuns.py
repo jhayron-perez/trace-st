@@ -1,3 +1,15 @@
+# Manuscript workflow: causal evolution of the 1991 Mount Pinatubo plume.
+#
+# TraCE-ST starts from an aerosol-optical-depth target near 15 N, 160 W on
+# 2 July 1991 and traces daily causal influence backward through SO2, sulfate
+# aerosol burden, H2SO4, and aerosol optical depth in the E3SMv2-SPA
+# simulation. Fixed-parameter Monte Carlo ensembles represent uncertainty from
+# competing causal-parent selections. Hyperparameter trials separately assess
+# sensitivity while respecting the daily transport scale and the local
+# stationarity assumptions of M-CaStLe. Distance-to-volcano and endpoint
+# diagnostics provide physical context; the volcano location is not supplied
+# as a causal constraint.
+
 from __future__ import annotations
 
 import os
@@ -40,7 +52,7 @@ GLOBAL_SEED = 11
 SEARCH_SEED = 11
 
 # -----------------------------------------------------------------------------
-# Pinatubo paths / constants
+# Simulation path, target child, volcano reference, and analysis scales
 # -----------------------------------------------------------------------------
 PATH_FILES_PINATUBO = "/glade/derecho/scratch/jhayron/DataCaStLeBTs/Sandia"
 PINATUBO_VAR_NAMES = ["TMSO201", "BURDENSO401", "TMH2SO401", "AEROD_v"]
@@ -56,7 +68,7 @@ RES_PINATUBO = 4
 BOX_SIZE_PINATUBO_BASE = 50.0
 
 # -----------------------------------------------------------------------------
-# General utilities
+# Longitude, distance, and serialization utilities
 # -----------------------------------------------------------------------------
 def lon0360_to_m180_180(lon):
     lon = np.asarray(lon, dtype=float) % 360.0
@@ -111,7 +123,7 @@ def canonicalize_for_json(obj):
 
 
 # -----------------------------------------------------------------------------
-# Pinatubo loading
+# Regridding and assembly of the multivariate plume fields
 # -----------------------------------------------------------------------------
 def regrid_global_nearest(
     da,
@@ -225,8 +237,8 @@ def build_case_pinatubo():
 
 # -----------------------------------------------------------------------------
 # Search space
-# Preserve Pinatubo ranges for timewindow / box_size / radius.
-# Use multivariate-style successful search for the rest.
+# Preserve case-specific transport scales for the time window, region, and
+# stencil radius while using the common multivariate TraCE-ST parameterization.
 # -----------------------------------------------------------------------------
 SEARCH_SPACE_SHARED_PINATUBO = dict(
     timewindow=["3d", "4d", "5d"],
@@ -325,7 +337,7 @@ def build_params_from_trial_pinatubo(trial, case):
     return p
 
 # -----------------------------------------------------------------------------
-# Run helpers
+# Single-trajectory and fixed-parameter Monte Carlo ensemble execution
 # -----------------------------------------------------------------------------
 def run_one_track(full_data, params, date_end):
     out = tst.trajectory.run_track(
@@ -381,7 +393,7 @@ def run_ensemble(case, params, M=30, seed=SEARCH_SEED):
 
 
 # -----------------------------------------------------------------------------
-# Geometry / density helpers
+# Pathway geometry and variable-specific trajectory-density accumulation
 # -----------------------------------------------------------------------------
 def get_timeres_days(timeres: str) -> float:
     timeres = str(timeres).strip().lower()
@@ -485,7 +497,7 @@ def _integrated_density_by_parent(
 
 
 # -----------------------------------------------------------------------------
-# Ensemble summarization for Pinatubo
+# Ensemble causal-contribution and physical-reference diagnostics
 # -----------------------------------------------------------------------------
 def summarize_ensemble_pinatubo(
     case,
@@ -817,7 +829,7 @@ def summarize_trial_pinatubo(case, trial_id, params, summary):
     return row
 
 # -----------------------------------------------------------------------------
-# Bundle serialization
+# Full ensemble artifacts used by downstream manuscript analysis
 # -----------------------------------------------------------------------------
 def _bundle_stem_pinatubo(trial_id):
     return f"pinatubo_trial_{int(trial_id):05d}"
@@ -914,7 +926,7 @@ def save_ensemble_bundle_pinatubo(bundle, bundles_dir: Path):
 
 
 # -----------------------------------------------------------------------------
-# Safe IO / resume helpers
+# Incremental output and restart support for long searches
 # -----------------------------------------------------------------------------
 def append_jsonl(path: Path, records):
     if not records:
@@ -978,7 +990,7 @@ def filter_pending_trials(all_jobs, completed_ids):
 
 
 # -----------------------------------------------------------------------------
-# Trial evaluation
+# Evaluate one physically admissible parameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_pinatubo(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED):
     case = build_case_pinatubo()
@@ -1024,7 +1036,7 @@ def evaluate_trial_pinatubo(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED)
 
 
 # -----------------------------------------------------------------------------
-# Worker
+# Multiprocessing wrapper for one parameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED):
     trial_id, trial = job
@@ -1145,7 +1157,7 @@ def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED):
 
 
 # -----------------------------------------------------------------------------
-# Main
+# Command-line orchestration and multiprocessing
 # -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="Trace-ST Pinatubo hyperparameter search")

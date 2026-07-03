@@ -1,3 +1,12 @@
+# Manuscript support workflow: causal-discovery backend timing benchmark.
+#
+# The controlled three-variable mixture is held fixed while Elastic-Net
+# Granger, PCMCI, and DYNOTEARS use common TraCE-ST geometry and selection
+# parameters wherever possible. Only backend-specific graph-estimation options
+# differ. The configured M_TEST controls the number of timed members; the
+# resulting wall-clock measurements compare end-to-end trajectory cost rather
+# than causal reconstruction quality.
+
 from __future__ import annotations
 
 import os
@@ -23,8 +32,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import trace_st as tst
 
 # ============================================================
-# Quick speed benchmark: Elastic Net vs PCMCI vs DYNOTEARS
-# Multivariate synthetic case, 5-member ensemble
+# Quick speed benchmark: Elastic-Net Granger vs PCMCI vs DYNOTEARS
+# Controlled multivariate causal-mixture case
 # ============================================================
 
 
@@ -141,9 +150,7 @@ print("Best PCMCI trial:", int(best_pcmci_row["trial_id"]))
 
 
 # ------------------------------------------------------------
-# Parameter builders
-# Requires build_base_params_multivar or equivalent helpers from earlier notebook/script.
-# If not loaded, use these standalone builders.
+# Standalone baseline configurations for each causal-discovery backend
 # ------------------------------------------------------------
 def build_base_params_elasticnet_multivar():
     return dict(
@@ -269,9 +276,9 @@ def build_cond_ind_test_from_name(name):
 
 
 # ------------------------------------------------------------
-# Build all methods using the SAME shared TraCE-ST hyperparameters
-# Use best Elastic Net shared hyperparameters as reference.
-# Only causal-discovery-specific kwargs differ.
+# Apply the same shared TraCE-ST parameters to every backend.
+# The selected Elastic-Net row provides the reference geometry and trajectory
+# settings; only causal-discovery-specific keyword arguments differ.
 # ------------------------------------------------------------
 
 SHARED_REFERENCE_ROW = best_elasticnet_row.copy()
@@ -400,7 +407,7 @@ for k in [
 
 
 # -----------------------------------------------------------------------------
-# Synthetic helpers
+# Controlled three-variable fields and prescribed causal mixture
 # -----------------------------------------------------------------------------
 def gaussian_blob(y2d, x2d, y0, x0, sig_y=6.0, sig_x=10.0, amp=1.0):
     dy = y2d - float(y0)
@@ -626,7 +633,7 @@ def build_multivariate_case(
 
 
 # -----------------------------------------------------------------------------
-# Run helpers
+# Single-trajectory and fixed-parameter timing-ensemble execution
 # -----------------------------------------------------------------------------
 def run_one_track(full_data, params, date_end):
     out = tst.trajectory.run_track(
@@ -679,8 +686,7 @@ def run_ensemble(case, base_params, M=20, seed=123):
 
 
 # ------------------------------------------------------------
-# Benchmark runner
-# Requires build_multivariate_case and run_ensemble from earlier notebook/script.
+# Timed execution and member-level wall-clock summaries
 # ------------------------------------------------------------
 def summarize_timing_members(ensemble_out):
     member_times = [

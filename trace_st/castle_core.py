@@ -1,7 +1,43 @@
-# NOTE: Auto-organized from original CausalBTs.py and mcastle_utils_vBT.py
+# PROVENANCE AND ATTRIBUTION
+# --------------------------
+# This module is a modified version of code from the CaStLe repository by
+# J. Jake Nichol and collaborators:
+#
+#   https://github.com/jjakenichol/CaStLe
+#
+# CaStLe introduced the univariate local-stencil framework; M-CaStLe
+# generalizes that framework to jointly model within-variable and cross-variable
+# local causal structures. This module has been adapted and extended for the
+# multivariate stencil learning and causal-discovery backends used by TraCE-ST.
+# The original CaStLe/M-CaStLe authors and repository should be acknowledged
+# when this code is used. See both citations below and the repository README.
+#
+# CaStLe: Space-Time Causal Discovery in Earth System Science: A Local Stencil
+# Learning Approach. J. Jake Nichol, Michael Weylandt, G. Matthew Fricke,
+# Melanie E. Moses, Diana Bull, and Laura P. Swiler. Journal of Geophysical
+# Research: Machine Learning and Computation, 2, e2024JH000546 (2025).
+# https://doi.org/10.1029/2024JH000546
+#
+# M-CaStLe: Uncovering Local Causal Structures in Multivariate Space-Time
+# Gridded Data. J. Jake Nichol, Michael Weylandt, G. Matthew Fricke,
+# Jhayron Perez-Carrasquilla, and Melanie E. Moses. arXiv:2605.00398 (2026).
+# https://doi.org/10.48550/arXiv.2605.00398
+#
+# NOTE: Auto-organized from original CausalBTs.py and mcastle_utils_vBT.py.
 
 """
 Multivariate CaStLe-Stencil Spatial Graph Mapping, Visualization, and Causal Discovery Utilities
+
+This TraCE-ST module is a modified adaptation of the implementation in
+``jjakenichol/CaStLe``. Modifications include multivariate stencil handling,
+integration with the TraCE-ST workflow, and support for the causal-discovery
+backends exposed below. It is not presented as an independently developed
+replacement for the upstream CaStLe/M-CaStLe implementation.
+
+CaStLe is the original univariate local-stencil meta-algorithm. M-CaStLe
+generalizes its local embedding and parent-identification stages to jointly
+model within-variable and cross-variable causal relationships. Both methods
+are associated with the upstream repository cited above.
 
 Author: J. Jake Nichol
 Email: jefnich@sandia.gov
@@ -3002,4 +3038,3 @@ def mv_CaStLe_GRANGER(
     if return_reduced_space:
         return results, reduced_space
     return results
-

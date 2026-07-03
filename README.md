@@ -34,6 +34,20 @@ The manuscript evaluates the method hierarchically, from controlled systems with
 
 The framework supports Elastic-Net Granger, PCMCI, and optional DYNOTEARS causal-discovery backends. The manuscript finds that the qualitative synthetic pathways can be recovered with all three under suitable parameter choices, while their accuracy, robustness, and computational cost differ.
 
+## M-CaStLe foundation and attribution
+
+TraCE-ST builds its local causal graphs with **M-CaStLe**, a generalization of the original **CaStLe** framework. CaStLe introduced local stencil learning for space–time causal discovery by constraining candidate parents to a fixed neighborhood and pooling spatial replicates under approximate locality and stationarity assumptions. M-CaStLe extends that construction from univariate fields to multivariate systems, jointly representing within-variable and cross-variable causal structure while retaining the sample-efficiency and grid-level interpretability of CaStLe.
+
+The original CaStLe method is described in:
+
+> [J. Jake Nichol](https://agupubs.onlinelibrary.wiley.com/authored-by/Nichol/J.+Jake), [Michael Weylandt](https://agupubs.onlinelibrary.wiley.com/authored-by/Weylandt/Michael), [G. Matthew Fricke](https://agupubs.onlinelibrary.wiley.com/authored-by/Fricke/G.+Matthew), [Melanie E. Moses](https://agupubs.onlinelibrary.wiley.com/authored-by/Moses/Melanie+E.), [Diana Bull](https://agupubs.onlinelibrary.wiley.com/authored-by/Bull/Diana), and [Laura P. Swiler](https://agupubs.onlinelibrary.wiley.com/authored-by/Swiler/Laura+P.). *Space-Time Causal Discovery in Earth System Science: A Local Stencil Learning Approach*. Journal of Geophysical Research: Machine Learning and Computation, 2, e2024JH000546, 2025. [https://doi.org/10.1029/2024JH000546](https://doi.org/10.1029/2024JH000546).
+
+The implementation in [`trace_st/castle_core.py`](trace_st/castle_core.py) is a **modified version of code from [jjakenichol/CaStLe](https://github.com/jjakenichol/CaStLe)**. It has been adapted and extended for the multivariate TraCE-ST workflow and its supported causal-discovery backends. The upstream CaStLe/M-CaStLe work should be acknowledged when using this part of the repository:
+
+> [J. Jake Nichol](https://arxiv.org/search/cs?searchtype=author&query=Nichol,+J+J), [Michael Weylandt](https://arxiv.org/search/cs?searchtype=author&query=Weylandt,+M), [G. Matthew Fricke](https://arxiv.org/search/cs?searchtype=author&query=Fricke,+G+M), [Jhayron Perez-Carrasquilla](https://arxiv.org/search/cs?searchtype=author&query=Perez-Carrasquilla,+J), and [Melanie E. Moses](https://arxiv.org/search/cs?searchtype=author&query=Moses,+M+E). *M-CaStLe: Uncovering Local Causal Structures in Multivariate Space-Time Gridded Data*. [arXiv:2605.00398](https://arxiv.org/abs/2605.00398), 2026. [https://doi.org/10.48550/arXiv.2605.00398](https://doi.org/10.48550/arXiv.2605.00398).
+
+The CaStLe and M-CaStLe implementations are maintained in the same upstream [jjakenichol/CaStLe](https://github.com/jjakenichol/CaStLe) repository. Please cite CaStLe, M-CaStLe, and TraCE-ST as appropriate when the local stencil-learning implementation is used as part of a TraCE-ST analysis.
+
 ## Interpretation and assumptions
 
 TraCE-ST is best used for physically informed causal analysis and hypothesis generation—not as a substitute for intervention experiments or process-based validation.

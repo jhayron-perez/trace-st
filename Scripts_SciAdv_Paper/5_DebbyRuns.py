@@ -1,3 +1,14 @@
+# Manuscript workflow: causal evolution of Tropical Storm Debby (2006).
+#
+# TraCE-ST starts from the precipitation target near 28 N, 46 W on
+# 26 August 2006 and traces hourly causal influence backward through infrared
+# brightness temperature (Tb), mid-level relative vorticity (vo), and
+# precipitation fields. Fixed-parameter Monte Carlo ensembles sample competing
+# causal pathways; separate hyperparameter trials characterize sensitivity
+# within physically admissible spatial and temporal scales. The observed
+# IBTrACS storm track is retained as an external physical-reference diagnostic,
+# not supplied to the causal-discovery algorithm.
+
 from __future__ import annotations
 
 import os
@@ -40,7 +51,7 @@ GLOBAL_SEED = 11
 SEARCH_SEED = 11
 
 # -----------------------------------------------------------------------------
-# Debby paths / constants
+# Debby input paths, target child, and native analysis scales
 # -----------------------------------------------------------------------------
 PATH_FILES_DEBBY = "/glade/derecho/scratch/jhayron/DataCaStLeBTs/FilesDebby"
 PATH_IBTRACS = "/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper/IBTrACS.NA.v04r01.nc"
@@ -53,7 +64,7 @@ RES_DEBBY = 0.25
 BOX_SIZE_DEBBY_BASE = 5.0
 
 # -----------------------------------------------------------------------------
-# General utilities
+# Longitude, distance, and serialization utilities
 # -----------------------------------------------------------------------------
 def lon0360_to_m180_180(lon):
     lon = np.asarray(lon, dtype=float) % 360.0
@@ -107,14 +118,14 @@ def canonicalize_for_json(obj):
     return obj
 
 # -----------------------------------------------------------------------------
-# Debby loading
+# Event fields and independent IBTrACS reference track
 # -----------------------------------------------------------------------------
 def load_debby_data(path_files_debby=PATH_FILES_DEBBY):
     var_tb = xr.open_dataset(f"{path_files_debby}/BT_anomalies_TC_argon.nc4").Tb
     var_vo = xr.open_dataset(f"{path_files_debby}/Vo_anomalies_TC_500-700.nc4").vo
     var_pr = xr.open_dataset(f"{path_files_debby}/P_anomalies_TC_argon2.nc4").precipitation
 
-    # precip fix: pick matching hour slice for each time
+    # Select the precipitation hour coordinate matching each valid timestamp.
     datalist = []
     for timetemp in var_pr.time:
         hourtemp = pd.to_datetime(timetemp.values).hour
@@ -224,8 +235,8 @@ def build_case_debby():
 
 # -----------------------------------------------------------------------------
 # Search space
-# Preserve Debby ranges for timewindow / box_size / radius.
-# Use multivariate-style successful search for the rest.
+# Preserve case-specific storm-motion scales for the time window, region, and
+# stencil radius while using the common multivariate TraCE-ST parameterization.
 # -----------------------------------------------------------------------------
 SEARCH_SPACE_SHARED_DEBBY = dict(
     timewindow=["5h", "6h", "7h"],
@@ -325,7 +336,7 @@ def build_params_from_trial_debby(trial, case):
 
 
 # -----------------------------------------------------------------------------
-# Run helpers
+# Single-trajectory and fixed-parameter Monte Carlo ensemble execution
 # -----------------------------------------------------------------------------
 def run_one_track(full_data, params, date_end):
     out = tst.trajectory.run_track(
@@ -381,7 +392,7 @@ def run_ensemble(case, params, M=30, seed=SEARCH_SEED):
 
 
 # -----------------------------------------------------------------------------
-# Observed-track interpolation / Debby diagnostics
+# Interpolation to the independent storm track and distance diagnostics
 # -----------------------------------------------------------------------------
 def get_timeres_hours(timeres: str) -> float:
     timeres = str(timeres).strip().lower()
@@ -522,7 +533,7 @@ def _member_geometry_stats_debby(centers, parents):
 
 
 # -----------------------------------------------------------------------------
-# Density accumulation
+# Variable-specific spatial trajectory-density accumulation
 # -----------------------------------------------------------------------------
 def _accumulate_density_box(density, xs, ys, centers, box_size):
     centers = np.asarray(centers, dtype=float)
@@ -570,7 +581,7 @@ def _integrated_density_by_parent(
 
 
 # -----------------------------------------------------------------------------
-# Ensemble summarization for Debby
+# Causal-contribution, track-distance, completion, and geometry diagnostics
 # -----------------------------------------------------------------------------
 def summarize_ensemble_debby(
     case,
@@ -895,7 +906,7 @@ def summarize_trial_debby(case, trial_id, params, summary):
 
 
 # -----------------------------------------------------------------------------
-# Bundle serialization
+# Full ensemble artifacts used by downstream manuscript analysis
 # -----------------------------------------------------------------------------
 def _bundle_stem_debby(trial_id):
     return f"debby_trial_{int(trial_id):05d}"
@@ -988,7 +999,7 @@ def save_ensemble_bundle_debby(bundle, bundles_dir: Path):
 
 
 # -----------------------------------------------------------------------------
-# Safe IO / resume helpers
+# Incremental output and restart support for long searches
 # -----------------------------------------------------------------------------
 def append_jsonl(path: Path, records):
     if not records:
@@ -1052,7 +1063,7 @@ def filter_pending_trials(all_jobs, completed_ids):
 
 
 # -----------------------------------------------------------------------------
-# Trial evaluation
+# Evaluate one physically admissible parameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED):
     case = build_case_debby()
@@ -1098,7 +1109,7 @@ def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED):
 
 
 # -----------------------------------------------------------------------------
-# Worker
+# Multiprocessing wrapper for one parameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED):
     trial_id, trial = job
@@ -1199,7 +1210,7 @@ def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED):
 
 
 # -----------------------------------------------------------------------------
-# Main
+# Command-line orchestration and multiprocessing
 # -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="Trace-ST Debby hyperparameter search")
