@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N trace_hp
+#PBS -N pinatubo_hp
 #PBS -A UMCP0021
 #PBS -q main
 #PBS -j oe
@@ -14,11 +14,11 @@ set -euo pipefail
 module load conda
 conda activate castle
 
-WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper"
+WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_Paper"
 cd "$WORKDIR"
 
-OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/univariate_v0"
-SCRIPT="1_SyntheticRuns_Univariate.py"
+OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsPinatubo/hp_search_v10"
+SCRIPT="6_PinatuboRuns.py"
 LOGDIR="${OUTDIR}/logs"
 
 mkdir -p "${OUTDIR}" "${LOGDIR}"
@@ -36,8 +36,9 @@ echo "=============================="
 
 python -u "${SCRIPT}" \
   --outdir "${OUTDIR}" \
-  --trials-per-method 1000 \
+  --n-trials 1000 \
   --n-workers 120 \
-  --flush-every 25 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+  --ensemble-size 30 \
+  --flush-every 10 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
 
 echo "Finished at: $(date)"

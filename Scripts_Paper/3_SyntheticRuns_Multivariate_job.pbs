@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N trace_hp
+#PBS -N trace_hp_multi
 #PBS -A UMCP0021
 #PBS -q main
 #PBS -j oe
@@ -14,11 +14,11 @@ set -euo pipefail
 module load conda
 conda activate castle
 
-WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper"
+WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_Paper"
 cd "$WORKDIR"
 
-OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/univariate_v0"
-SCRIPT="1_SyntheticRuns_Univariate.py"
+OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/multivariate_v4"
+SCRIPT="3_SyntheticRuns_Multivariate.py"
 LOGDIR="${OUTDIR}/logs"
 
 mkdir -p "${OUTDIR}" "${LOGDIR}"
@@ -32,12 +32,15 @@ echo "host: $(hostname)"
 echo "workdir: ${WORKDIR}"
 echo "outdir: ${OUTDIR}"
 echo "tmpdir: ${TMPDIR}"
+echo "script: ${SCRIPT}"
 echo "=============================="
 
 python -u "${SCRIPT}" \
   --outdir "${OUTDIR}" \
-  --trials-per-method 1000 \
+  --n-trials 300 \
+  --ensemble-size 30 \
   --n-workers 120 \
-  --flush-every 25 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+  --flush-every 10 \
+  --seed 11 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
 
 echo "Finished at: $(date)"

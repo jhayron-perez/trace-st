@@ -159,7 +159,7 @@ Choose these values from the temporal resolution, grid spacing, propagation spee
 trace_st/                  Core package: data preparation, causal stencils,
                            parent clustering, movement, and trajectory driver
 Tutorials/                 Self-contained introductory notebook
-Scripts_SciAdv_Paper/      Synthetic and case-study analysis workflows used
+Scripts_Paper/             Synthetic and case-study analysis workflows used
                            for the manuscript figures
 environment.yml            Reproducible Conda environment
 pyproject.toml              Package metadata and pip dependencies
@@ -169,10 +169,10 @@ The case-study workflows require their corresponding scientific datasets and, fo
 
 ## Reproducing manuscript analyses
 
-Scripts are numbered by analysis stage in `Scripts_SciAdv_Paper/`. Run them from the repository root after activating the environment. For example:
+Scripts are numbered by analysis stage in `Scripts_Paper/`. Run them from the repository root after activating the environment. For example:
 
 ```bash
-python Scripts_SciAdv_Paper/3_SyntheticRuns_Multivariate.py --help
+python Scripts_Paper/3_SyntheticRuns_Multivariate.py --help
 ```
 
 The directory also contains notebooks used to analyze stored trajectory ensembles and produce manuscript figures. Large real-world workflows are research pipelines rather than lightweight examples; inspect their data paths and scheduler settings before execution.

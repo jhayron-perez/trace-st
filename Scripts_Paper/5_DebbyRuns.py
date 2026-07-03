@@ -54,7 +54,7 @@ SEARCH_SEED = 11
 # Debby input paths, target child, and native analysis scales
 # -----------------------------------------------------------------------------
 PATH_FILES_DEBBY = "/glade/derecho/scratch/jhayron/DataCaStLeBTs/FilesDebby"
-PATH_IBTRACS = "/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper/IBTrACS.NA.v04r01.nc"
+PATH_IBTRACS = "/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_Paper/IBTrACS.NA.v04r01.nc"
 
 EVENT_LAT_DEBBY = 28.0
 EVENT_LON_DEBBY = -46.0

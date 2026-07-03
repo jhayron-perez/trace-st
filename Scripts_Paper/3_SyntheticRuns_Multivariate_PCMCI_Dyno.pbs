@@ -1,12 +1,12 @@
 #!/bin/bash
-#PBS -N pinatubo_hp
+#PBS -N trace_hp_multi
 #PBS -A UMCP0021
 #PBS -q main
 #PBS -j oe
 #PBS -k eod
 #PBS -m abe
 #PBS -l walltime=12:00:00
-#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l select=1:ncpus=128:mem=235GB
 #PBS -l job_priority=premium
 
 set -euo pipefail
@@ -14,14 +14,15 @@ set -euo pipefail
 module load conda
 conda activate castle
 
-WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_SciAdv_Paper"
+WORKDIR="/glade/u/home/jhayron/Causality_CaStLe/PaperCausalBTs/Scripts_Paper"
 cd "$WORKDIR"
 
-OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsPinatubo/hp_search_v10"
-SCRIPT="6_PinatuboRuns.py"
+OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/multivariate_v5"
+SCRIPT="3_SyntheticRuns_Multivariate_PCMCI_Dyno.py"
 LOGDIR="${OUTDIR}/logs"
 
 mkdir -p "${OUTDIR}" "${LOGDIR}"
+
 export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"
 mkdir -p "${TMPDIR}"
 
@@ -32,13 +33,15 @@ echo "host: $(hostname)"
 echo "workdir: ${WORKDIR}"
 echo "outdir: ${OUTDIR}"
 echo "tmpdir: ${TMPDIR}"
+echo "script: ${SCRIPT}"
 echo "=============================="
 
 python -u "${SCRIPT}" \
   --outdir "${OUTDIR}" \
-  --n-trials 1000 \
+  --trials-per-method 30 \
+  --ensemble-size 20 \
   --n-workers 120 \
-  --ensemble-size 30 \
-  --flush-every 10 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+  --flush-every 5 \
+  --seed 11 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
 
 echo "Finished at: $(date)"
