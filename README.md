@@ -23,20 +23,6 @@ Given a target event, TraCE-ST:
 
 The resulting trajectory is an ordered sequence of `(variable, spatial region)` pairs. With one parameter configuration held fixed, a probabilistic Monte Carlo ensemble repeatedly samples among competing parent groups according to their inferred causal strengths. The resulting spread represents pathway-selection uncertainty under that configured model—not sensitivity to the parameter values. Locations and variables repeatedly visited across a sufficiently large Monte Carlo ensemble provide an empirical measure of relative causal relevance to the target event.
 
-## Visualizations
-
-### Synthetic experiment: reconstructing known source pathways
-
-**Ground truth parent field (Variable A):** Moving Gaussian blobs following prescribed Bézier curves toward the event location.
-
-<img src="Scripts_Paper/animations/case1_parent_A_clean_blobs_tminus30_to_t0.gif" width="500" alt="Ground truth parent A field" />
-
-**Ensemble reconstruction:** Five TraCE-ST trajectories from the same event, using different parameter configurations. The spread shows the method's sensitivity to parameter choices, while consistent features (like approaching variable A) indicate robust causal inference.
-
-<img src="Scripts_Paper/animations/case1_granger_ensemble_reconstruction_coded_background.gif" width="500" alt="Ensemble reconstructed trajectories" />
-
-Both animations show 30 days of backward time stepping (t−30 to event time t=0), with the event marked by a black cross.
-
 ## Scientific evaluation
 
 The manuscript evaluates the method hierarchically, from controlled systems with known causal structure to real Earth system events.
@@ -47,6 +33,18 @@ The manuscript evaluates the method hierarchically, from controlled systems with
 - **Pacific Northwest heatwave (2021):** trajectories recover large-scale circulation, remote convective, moisture, and surface-energy pathways, including candidate ocean-surface-flux contributions over the northeast Pacific.
 
 The framework supports Elastic-Net Granger, PCMCI, and optional DYNOTEARS causal-discovery backends. The manuscript finds that the qualitative synthetic pathways can be recovered with all three under suitable parameter choices, while their accuracy, robustness, and computational cost differ.
+
+### Synthetic experiment: reconstructing known source pathways
+
+**Ground truth parent field (Variable A):** Moving Gaussian blobs following prescribed Bézier curves toward the event location (three examples).
+
+<img src="Scripts_Paper/animations/case1_parent_A_clean_blobs_tminus30_to_t0.gif" width="500" alt="Ground truth parent A field" />
+
+**Ensemble reconstruction:** TraCE-ST trajectories for the same events. The spread shows the method's sensitivity to parameter choices, while consistent features (like approaching variable A) indicate robust causal inference.
+
+<img src="Scripts_Paper/animations/case1_granger_ensemble_reconstruction_coded_background.gif" width="500" alt="Ensemble reconstructed trajectories" />
+
+Both animations show 30 days of backward time stepping (t−30 to event time t=0), with the event marked by a black cross.
 
 ## M-CaStLe foundation
 
