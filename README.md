@@ -1,4 +1,4 @@
-# TraCE-ST: tracing the space–time causal origins of Earth system extremes
+# TraCE-ST: tracing the space-time causal origins of Earth system extremes
 
 TraCE-ST (**Tracer of Causal Evolutions in Space and Time**) reconstructs event-conditioned causal pathways in multivariate gridded data. Starting from an event at a chosen variable, location, and time, it works backward through a sequence of locally inferred causal graphs to identify where influential signals came from, which variables carried them, and how those influences evolved before the event.
 
@@ -6,7 +6,7 @@ The framework is Lagrangian-inspired, but it does **not** trace physical parcels
 
 This repository contains the Python implementation, a self-contained tutorial, and the analysis workflows accompanying the manuscript:
 
-> J. S. Pérez-Carrasquilla et al., *Tracing the space–time causal origins of Earth system extremes* (manuscript in preparation).
+> J. S. Pérez-Carrasquilla et al., *Tracing the space-time causal origins of Earth system extremes* (manuscript in preparation).
 
 ## Why TraCE-ST?
 
