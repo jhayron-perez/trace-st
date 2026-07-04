@@ -194,10 +194,10 @@ The case-study workflows require their corresponding scientific datasets and, fo
 
 ## Citation
 
-The manuscript is still in preparation. Until a DOI and final bibliographic record are available, cite the repository and the draft title:
+Please cite the repository and the draft:
 
 ```text
-Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). *Tracing the space-time causal origins of Earth system extremes*.
+Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). Tracing the space-time causal origins of Earth system extremes.
 
 https://github.com/jhayron-perez/trace-st
 ```
