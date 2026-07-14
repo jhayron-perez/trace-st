@@ -87,7 +87,7 @@ Python 3.11 or newer is recommended.
 ### Conda or Mamba
 
 ```bash
-conda env create -f environment.yml
+conda env create -f trace-st.yml
 conda activate trace-st
 pip install -e .
 ```
@@ -186,7 +186,7 @@ Tutorials/                 Synthetic and real-data introductory notebooks,
                            including the processed three-variable PNW21 input
 Scripts_Paper/             Synthetic and case-study analysis workflows used
                            for the manuscript figures
-environment.yml            Reproducible Conda environment
+trace-st.yml                Reproducible Conda environment
 pyproject.toml              Package metadata and pip dependencies
 ```
 

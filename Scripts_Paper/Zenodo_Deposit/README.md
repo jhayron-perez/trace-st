@@ -109,7 +109,7 @@ Exact bundle names and retained trial identifiers are listed in the correspondin
 The scripts and figure-analysis notebooks are in the repository’s `Scripts_Paper/` directory. Create the software environment and install the package with:
 
 ```bash
-conda env create -f environment.yml
+conda env create -f trace-st.yml
 conda activate trace-st
 pip install -e .
 ```
