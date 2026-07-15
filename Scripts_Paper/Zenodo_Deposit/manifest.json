@@ -1,6 +1,9 @@
 {
   "deposit_title": "TraCE-ST processed data and trajectory ensembles",
   "manuscript_title": "Tracing the space-time causal origins of Earth system extremes",
+  "manuscript_arxiv": "2607.10033",
+  "manuscript_doi": "10.48550/arXiv.2607.10033",
+  "manuscript_url": "https://arxiv.org/abs/2607.10033",
   "version": "1.0.0",
   "repository": "https://github.com/jhayron-perez/trace-st",
   "contact": {

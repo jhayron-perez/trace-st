@@ -42,6 +42,7 @@ dev = [
 Homepage = "https://github.com/jhayron-perez/trace-st"
 Repository = "https://github.com/jhayron-perez/trace-st.git"
 Issues = "https://github.com/jhayron-perez/trace-st/issues"
+Preprint = "https://arxiv.org/abs/2607.10033"
 
 [tool.setuptools]
 packages = ["trace_st"]

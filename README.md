@@ -6,7 +6,7 @@ The framework is Lagrangian-inspired, but it does **not** trace physical parcels
 
 This repository contains the Python implementation, introductory synthetic and real-data tutorials, and the analysis workflows accompanying the manuscript:
 
-> Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). *Tracing the space-time causal origins of Earth system extremes*.
+> Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). *Tracing the space-time causal origins of Earth system extremes*. arXiv:2607.10033 [physics.ao-ph]. [https://doi.org/10.48550/arXiv.2607.10033](https://doi.org/10.48550/arXiv.2607.10033).
 
 ## Why TraCE-ST?
 
@@ -194,10 +194,10 @@ The case-study workflows require their corresponding scientific datasets and, fo
 
 ## Citation
 
-Please cite the repository and the draft:
+Please cite the preprint and the repository:
 
 ```text
-Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). Tracing the space-time causal origins of Earth system extremes.
+Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). Tracing the space-time causal origins of Earth system extremes. arXiv:2607.10033 [physics.ao-ph]. https://doi.org/10.48550/arXiv.2607.10033
 
 https://github.com/jhayron-perez/trace-st
 ```

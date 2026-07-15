@@ -4,7 +4,7 @@
 
 This deposit contains the analysis-ready gridded inputs, trajectory ensembles, hyperparameter summaries, and intermediate result tables supporting:
 
-> Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). Tracing the space-time causal origins of Earth system extremes.
+> Pérez-Carrasquilla, J. S., Nichol, J. J., Robledo, V., Bull, D., Dagon, K., Evans, M. N., & Molina, M. J. (2026). *Tracing the space-time causal origins of Earth system extremes*. arXiv:2607.10033 [physics.ao-ph]. [https://doi.org/10.48550/arXiv.2607.10033](https://doi.org/10.48550/arXiv.2607.10033).
 
 TraCE-ST (Tracer of Causal Evolutions in Space and Time) reconstructs event-conditioned causal pathways in multivariate gridded data by iteratively tracing lagged causal parents through localized M-CaStLe graphs. These files support the controlled synthetic experiments and the three real-world applications presented in the manuscript.
 
