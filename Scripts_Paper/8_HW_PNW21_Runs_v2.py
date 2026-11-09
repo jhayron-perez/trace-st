@@ -570,7 +570,8 @@ def summarize_ensemble_results(
     summary["median_steps"] = float(np.median(steps_arr))
     summary["min_steps"] = int(np.min(steps_arr))
     summary["max_steps"] = int(np.max(steps_arr))
-    summary["fraction_full_length"] = float(np.mean(steps_arr == params["n_steps_time"]))
+    # centers include the start point, so a full track has n_steps_time + 1 entries
+    summary["fraction_full_length"] = float(np.mean(steps_arr == params["n_steps_time"] + 1))
 
     # ---------- displacement from target event to final point ----------
     end_lats = np.array([c[-1, 0] for c in centers_ens if len(c) > 0], dtype=float)
