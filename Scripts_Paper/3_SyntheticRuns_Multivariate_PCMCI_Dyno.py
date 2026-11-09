@@ -1408,6 +1408,9 @@ def parse_args():
     parser.add_argument("--ensemble-size", type=int, default=20, help="Ensemble members per alpha_mix")
     parser.add_argument("--seed", type=int, default=SEARCH_SEED, help="Search seed")
     parser.add_argument("--flush-every", type=int, default=5, help="Write snapshot every N completed jobs")
+    parser.add_argument("--methods", type=str, nargs="+", default=None,
+                        help="Subset of METHODS to run (default: all). Configs are drawn for all "
+                             "methods first, so a subset gets the same configs as the full run.")
     return parser.parse_args()
 
 
@@ -1435,6 +1438,8 @@ def main():
         n_trials_per_method=args.trials_per_method,
         seed=args.seed,
     )
+    if args.methods is not None:
+        all_jobs = [j for j in all_jobs if j[0] in set(args.methods)]
 
     completed_keys, existing_job_rows = load_completed_job_keys(jobs_jsonl)
     pending_jobs = filter_pending_jobs(all_jobs, completed_keys)
