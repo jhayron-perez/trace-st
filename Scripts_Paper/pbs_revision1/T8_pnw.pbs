@@ -1,0 +1,41 @@
+#!/bin/bash
+#PBS -N tst_T8_pnw
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -M jhayron@uchicago.edu
+#PBS -m abe
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+# Revision-1 run. qsub -v DRYRUN=1 ... runs a 2-trial dry run into revision1/dryrun/. EXTRA_ARGS adds opt-in flags.
+set -uo pipefail
+module load conda
+conda activate castle
+
+REPO="${REPO:-/glade/u/home/jhayron/Causality_CaStLe/trace-st-rev1-run}"
+R1="/glade/derecho/scratch/jhayron/DataCaStLeBTs/revision1"
+SCRIPT="8_HW_PNW21_Runs_v2.py"
+if [[ "${DRYRUN:-0}" == "1" ]]; then
+  OUTDIR="$R1/dryrun/${OUTNAME:-T8_pnw}"
+  ARGS=(--n-trials 2 --n-members 2 --nproc 2 --start-method fork --continue-if-exists --placebo-vars z500 tcwv --placebo-year 2010)
+else
+  OUTDIR="$R1/${OUTNAME:-T8_pnw}"
+  ARGS=(--n-trials 300 --n-members 30 --nproc 120 --start-method fork --continue-if-exists --placebo-vars z500 tcwv --placebo-year 2010)
+fi
+cd "$REPO/Scripts_Paper" || exit 2
+LOGDIR="${OUTDIR}/logs"
+mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"
+mkdir -p "${TMPDIR}"
+
+echo "========== JOB INFO =========="
+echo "date: $(date)"; echo "jobid: ${PBS_JOBID}"; echo "host: $(hostname)"
+echo "repo: ${REPO} @ $(git -C "$REPO" describe --tags --always) $(git -C "$REPO" rev-parse HEAD)"
+echo "outdir: ${OUTDIR}"; echo "args: ${ARGS[*]} ${EXTRA_ARGS:-}"
+echo "=============================="
+
+python -u "${SCRIPT}" --outdir "${OUTDIR}" "${ARGS[@]}" ${EXTRA_ARGS:-} 2>&1 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+echo "python exit: ${PIPESTATUS[0]}"
+echo "Finished at: $(date)"

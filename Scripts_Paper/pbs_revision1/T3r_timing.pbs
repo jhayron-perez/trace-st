@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N tst_T3r_timing
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -M jhayron@uchicago.edu
+#PBS -m abe
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+# T3r: TestSpeed_Synth2.py on one dedicated node, M=5 repeats per engine, PCMCI native + refit,
+# DYNOTEARS max_iter 100 (unchanged). Paper geometry (4d, 20, 3) then a T2-range geometry (6d, 35, 5).
+set -uo pipefail
+module load conda
+conda activate castle
+REPO="${REPO:-/glade/u/home/jhayron/Causality_CaStLe/trace-st-rev1-run}"
+OUTDIR="/glade/derecho/scratch/jhayron/DataCaStLeBTs/revision1/${OUTNAME:-T3r_timing}"
+M="${M_TEST:-5}"
+mkdir -p "$OUTDIR/logs"; cd "$REPO/Scripts_Paper" || exit 2
+echo "host: $(hostname)"; lscpu | grep "Model name"; echo "repo: $(git -C "$REPO" describe --tags --always)"
+python -u TestSpeed_Synth2.py --outdir "$OUTDIR" --m-test "$M" --pcmci-strength-modes native refit --tag "M${M}_geom4d-20-3" 2>&1 | tee -a "$OUTDIR/logs/run_${PBS_JOBID}_geomA.log"
+echo "python exit A: ${PIPESTATUS[0]}"
+python -u TestSpeed_Synth2.py --outdir "$OUTDIR" --m-test "$M" --geometry 6d 35 5 --pcmci-strength-modes native refit --tag "M${M}_geom6d-35-5" 2>&1 | tee -a "$OUTDIR/logs/run_${PBS_JOBID}_geomB.log"
+echo "python exit B: ${PIPESTATUS[0]}"
+date

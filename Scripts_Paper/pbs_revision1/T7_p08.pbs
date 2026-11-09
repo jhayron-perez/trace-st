@@ -1,0 +1,41 @@
+#!/bin/bash
+#PBS -N tst_T7_p08
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -M jhayron@uchicago.edu
+#PBS -m abe
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+# Revision-1 run. qsub -v DRYRUN=1 ... runs a 2-trial dry run into revision1/dryrun/. EXTRA_ARGS adds opt-in flags.
+set -uo pipefail
+module load conda
+conda activate castle
+
+REPO="${REPO:-/glade/u/home/jhayron/Causality_CaStLe/trace-st-rev1-run}"
+R1="/glade/derecho/scratch/jhayron/DataCaStLeBTs/revision1"
+SCRIPT="3_SyntheticRuns_Multivariate.py"
+if [[ "${DRYRUN:-0}" == "1" ]]; then
+  OUTDIR="$R1/dryrun/${OUTNAME:-T7_distractors/p08}"
+  ARGS=(--n-trials 2 --alpha-grid 0.6 --ensemble-size 2 --n-workers 2 --flush-every 1 --seed 11 --n-noise 2 --n-decoy 2 --n-moving 1)
+else
+  OUTDIR="$R1/${OUTNAME:-T7_distractors/p08}"
+  ARGS=(--n-trials 50 --alpha-grid 0.6 --ensemble-size 30 --n-workers 120 --flush-every 5 --seed 11 --n-noise 2 --n-decoy 2 --n-moving 1)
+fi
+cd "$REPO/Scripts_Paper" || exit 2
+LOGDIR="${OUTDIR}/logs"
+mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"
+mkdir -p "${TMPDIR}"
+
+echo "========== JOB INFO =========="
+echo "date: $(date)"; echo "jobid: ${PBS_JOBID}"; echo "host: $(hostname)"
+echo "repo: ${REPO} @ $(git -C "$REPO" describe --tags --always) $(git -C "$REPO" rev-parse HEAD)"
+echo "outdir: ${OUTDIR}"; echo "args: ${ARGS[*]} ${EXTRA_ARGS:-}"
+echo "=============================="
+
+python -u "${SCRIPT}" --outdir "${OUTDIR}" "${ARGS[@]}" ${EXTRA_ARGS:-} 2>&1 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+echo "python exit: ${PIPESTATUS[0]}"
+echo "Finished at: $(date)"
