@@ -36,9 +36,15 @@ def get_mcastle_box(
     child_variable: Optional[int] = None,
     cd_method: str = "pcmci",
     cd_kwargs: Optional[Dict[str, Any]] = None,
+    strength_mode: str = "native",
 ):
     """
     Run M-CaStLe in a box centered at (lat,lon) for a list of variables.
+
+    strength_mode : {"native", "refit"}
+        "native" (default, original behavior): link strengths as returned by the engine.
+        "refit": keep the engine's selected parents, replace their strengths with
+        standardized least-squares refit coefficients (mcastle.refit_link_strengths).
 
     Parameters
     ----------
@@ -131,6 +137,16 @@ def get_mcastle_box(
     else:
         raise ValueError(f"Unknown cd_method='{cd_method}'. Use 'pcmci' or 'dynotears'.")
 
+    if strength_mode == "refit":
+        learned_stencil_vals = mcastle.refit_link_strengths(
+            datacastlebox, learned_stencil_graph, learned_stencil_vals,
+            radius=int(radius), y_ascending=bool(kwargs.get("y_ascending", True)),
+            dependencies_wrap=bool(kwargs.get("dependencies_wrap", False)),
+            child_variable=child_variable,
+        )
+    elif strength_mode != "native":
+        raise ValueError(f"strength_mode must be 'native' or 'refit', got {strength_mode!r}")
+
     # --- split into per-(parent,child) blocks like before ---
     stencil_size = (2 * int(radius) + 1) ** 2
     n_vars = learned_stencil_graph.shape[0] // stencil_size
@@ -191,6 +207,7 @@ def run_track(
     beta_softmax = params.get("beta_softmax", 100.0)
     beta_softmax = 100.0 if beta_softmax is None else float(beta_softmax)
     prob_rule = str(params.get("prob_rule", "linear"))
+    strength_mode = str(params.get("strength_mode", "native"))
     if rng is None and params.get("seed", None) is not None:
         rng = np.random.default_rng(int(params["seed"]))
 
@@ -316,6 +333,7 @@ def run_track(
                 child_variable=current_child,
                 cd_method=cd_method,
                 cd_kwargs=cd_kwargs,
+                strength_mode=strength_mode,
             )
         except ValueError as e:
             if "No valid reference point" in str(e):

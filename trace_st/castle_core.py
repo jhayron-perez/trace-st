@@ -3038,3 +3038,83 @@ def mv_CaStLe_GRANGER(
     if return_reduced_space:
         return results, reduced_space
     return results
+
+
+# -----------------------------------------------------------------------------
+# Revision-1 (R2 major 2): common causal-strength refit, opt-in
+# -----------------------------------------------------------------------------
+def refit_link_strengths(
+    data: np.ndarray,
+    graph: np.ndarray,
+    val_matrix: np.ndarray,
+    *,
+    radius: int = 1,
+    y_ascending: bool = True,
+    dependencies_wrap: bool = False,
+    child_variable: Optional[int] = None,
+    cond_max: float = 1e8,
+    ridge_alpha: float = 1e-2,
+) -> np.ndarray:
+    """Replace the strengths of the selected lag-1 links by standardized OLS refit coefficients.
+
+    Used by get_mcastle_box(strength_mode="refit") so that "causal strength" means
+    the same thing for every engine (Elastic-Net/Granger, PCMCI, DYNOTEARS):
+    for each child center node, the parents selected by the engine
+    (graph[:, child, 1] == "-->") are refit by least squares of the child at t on
+    those parents at t-1, on the same encoded design (get_MV_reduced_space;
+    t-1 -> t pairs within each cell block, as in _lasso_single_child_lag1),
+    with an intercept. Coefficients are standardized: beta_j * sd(x_j) / sd(y).
+    If the standardized design is ill-conditioned (cond > cond_max) or rank
+    deficient, ridge (alpha=ridge_alpha) on the standardized design is used.
+    Signs come from the refit. The graph (selection) is not changed; only
+    val_matrix[:, child, 1] entries of selected links are replaced.
+    """
+    data = np.asarray(data, dtype=float)
+    reduced_space = get_MV_reduced_space(
+        data=data, dependencies_wrap=dependencies_wrap, y_ascending=y_ascending, radius=int(radius)
+    ).astype(float)
+    T = int(data.shape[-1])
+    n_rows, node_count = reduced_space.shape
+    if n_rows % T != 0:
+        raise ValueError(f"reduced_space rows ({n_rows}) not divisible by T ({T}).")
+    R = n_rows // T
+    idx = np.arange(R * T).reshape(R, T)
+    src = idx[:, :-1].ravel()
+    dst = idx[:, 1:].ravel()
+    X_all = reduced_space[src, :]
+
+    stencil_size = (2 * int(radius) + 1) ** 2
+    center_index = stencil_size // 2
+    possible_children = list(range(center_index, node_count, stencil_size))
+    if child_variable is not None:
+        children = [possible_children[int(child_variable) - 1]]
+    else:
+        children = possible_children
+
+    val_new = np.array(val_matrix, dtype=float, copy=True)
+    for c in children:
+        parents = np.where(graph[:, c, 1] == "-->")[0]
+        if parents.size == 0:
+            continue
+        y = reduced_space[dst, c]
+        X = X_all[:, parents]
+        sx = X.std(axis=0)
+        sy = y.std()
+        if sy < 1e-12:
+            val_new[parents, c, 1] = 0.0
+            continue
+        ok = sx > 1e-12
+        Z = np.zeros_like(X)
+        Z[:, ok] = (X[:, ok] - X[:, ok].mean(axis=0)) / sx[ok]
+        yz = (y - y.mean()) / sy
+        beta = np.zeros(parents.size)
+        if ok.any():
+            Zok = Z[:, ok]
+            if np.linalg.matrix_rank(Zok) < Zok.shape[1] or np.linalg.cond(Zok) > cond_max:
+                from sklearn.linear_model import Ridge
+                b = Ridge(alpha=float(ridge_alpha), fit_intercept=True).fit(Zok, yz).coef_
+            else:
+                b = np.linalg.lstsq(Zok, yz, rcond=None)[0]
+            beta[ok] = b
+        val_new[parents, c, 1] = beta
+    return val_new
