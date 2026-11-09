@@ -126,6 +126,118 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
     )
 
 
+def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
+                      sig_y, sig_x, seed, clip_to_positive=True):
+    """Revision-1 T7 non-causal variables (none of them enters B's equation).
+
+    noise k  : independent smoothed AR(1) field, same construction as the A/C noise
+               (make_spatiotemporal_ar1_noise, phi=0.85, sigma=0.10), seed + 100 + k.
+    decoy k  : driven by A (k even) or C (k odd) with the T1 (case-1) V2 equation
+               D[t] = 0.8 D[t-1] + 0.8 X[t-1] + AR(1) noise (phi 0.8, sigma 0.1), seed + 200 + k.
+    moving k : independent Gaussian blob (same size/amplitude as A, C) on a straight Bezier
+               track whose closest approach (15 units from the event, perpendicular offset)
+               is at t = t0 - 2, i.e. within ~20 units of the event during t0-5..t0;
+               approach direction 45 deg + 360 k / n_moving; speed 2.5 units/day; plus A/C-type
+               AR(1) noise, seed + 300 + k. Not coupled to B.
+    """
+    out, info = [], []
+    ey, ex = float(event[0]), float(event[1])
+    for k in range(int(n_noise)):
+        arr = make_spatiotemporal_ar1_noise(A.shape, phi=0.85, sigma=0.10, rng=np.random.default_rng(seed + 100 + k))
+        name = f"N{k + 1}"
+        out.append(build_dataarray(name, arr, time_coord, ys, xs)); info.append((name, "noise"))
+    for k in range(int(n_decoy)):
+        X = A if k % 2 == 0 else C
+        nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=0.1, rng=np.random.default_rng(seed + 200 + k))
+        D = np.zeros_like(A, dtype=np.float32)
+        D[0] = nz[0]
+        for t in range(1, T):
+            D[t] = 0.8 * D[t - 1] + 0.8 * X[t - 1] + nz[t]
+        if clip_to_positive:
+            D = np.clip(D, 0.0, None)
+        name = f"D{k + 1}_{'A' if k % 2 == 0 else 'C'}"
+        out.append(build_dataarray(name, D, time_coord, ys, xs)); info.append((name, "decoy"))
+    for k in range(int(n_moving)):
+        th = np.deg2rad(45.0 + 360.0 * k / max(int(n_moving), 1))
+        d = np.array([np.sin(th), np.cos(th)])          # (dy, dx) direction of motion
+        perp = np.array([-d[1], d[0]])
+        tc = float(t0 - 2)
+        q = np.array([ey, ex]) + 15.0 * perp
+        start = q - 2.5 * tc * d
+        end = q + 2.5 * (T - 1 - tc) * d
+        cen = bezier_centers(start, start + (end - start) / 3, start + 2 * (end - start) / 3, end, T)
+        clean = np.stack([gaussian_blob(y2d, x2d, cen[t, 0], cen[t, 1], sig_y=sig_y, sig_x=sig_x, amp=1.0)
+                          for t in range(T)]).astype(np.float32)
+        nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.85, sigma=0.10, rng=np.random.default_rng(seed + 300 + k))
+        M_ = clean + nz
+        if clip_to_positive:
+            M_ = np.clip(M_, 0.0, None)
+        name = f"M{k + 1}"
+        out.append(build_dataarray(name, M_, time_coord, ys, xs)); info.append((name, "moving"))
+    return out, info
+
+
+def summarize_all_vars(case, ensemble_out, params):
+    """Revision-1 T7 metrics over all p variables (the original summary only counts vars 1-3)."""
+    xs, ys = case["xs"], case["ys"]
+    names = [str(v) for v in case["full_data_run"]["var"].values]
+    nv = len(names)
+    types = ["cause", "target", "cause"] + [t for _, t in case.get("extra_vars", [])]
+    dens = np.zeros(nv)
+    end_counts = np.zeros(nv)
+    T = int(case["T"])
+    truth = {1: case["centers_A"], 3: case["centers_C"]}
+    errs, elapsed, full = [], [], []
+    for m in ensemble_out["members"]:
+        if not m["ok"] or len(m["parents"]) == 0:
+            continue
+        c = np.asarray(m["centers"], float); pa = np.asarray(m["parents"], int)
+        elapsed.append(float(m["elapsed_sec"])); full.append(len(c) == int(params["n_steps_time"]) + 1)
+        for v in range(1, nv + 1):
+            mask = pa == v
+            if mask.any():
+                dens[v - 1] += _accumulate_density_box(np.zeros((len(ys), len(xs))), xs, ys, c[mask],
+                                                       float(params["box_size"])).sum()
+        end_counts[pa[-1] - 1] += 1
+        for kstep in range(1, len(pa)):
+            v = int(pa[kstep]); ti = T - 1 - kstep
+            if v in truth and ti >= 0:
+                errs.append(float(np.hypot(*(c[kstep] - truth[v][ti]))))
+    tot = dens.sum()
+    a = float(case["alpha_mix"])
+    d13 = dens[0] + dens[2]
+    e13 = end_counts[0] + end_counts[2]
+    box = tst.get_data_mcastle(list(case["event"]), float(params["box_size"]),
+                               [case["full_data_run"].sel(var=v).isel(time=slice(0, int(pd.to_timedelta(params["timewindow"]) / pd.to_timedelta(params["timeres"]))))
+                                for v in case["full_data_run"]["var"].values])
+    r = int(params["radius"]); _, ny, nx, tw = box.shape
+    n_samples = max(ny - 2 * r, 0) * max(nx - 2 * r, 0) * (tw - 1)
+    n_features = nv * (2 * r + 1) ** 2
+    row = {
+        "t7_p": nv,
+        "t7_n_noise": types.count("noise"), "t7_n_decoy": types.count("decoy"), "t7_n_moving": types.count("moving"),
+        "t7_share_density_v1v3": float(d13 / tot) if tot > 0 else np.nan,
+        "t7_share_density_target": float(dens[1] / tot) if tot > 0 else np.nan,
+        "t7_share_density_noise": float(sum(dens[i] for i, t in enumerate(types) if t == "noise") / tot) if tot > 0 else np.nan,
+        "t7_share_density_decoy": float(sum(dens[i] for i, t in enumerate(types) if t == "decoy") / tot) if tot > 0 else np.nan,
+        "t7_share_density_moving": float(sum(dens[i] for i, t in enumerate(types) if t == "moving") / tot) if tot > 0 else np.nan,
+        "t7_alpha_rec_density_13": float(dens[0] / d13) if d13 > 0 else np.nan,
+        "t7_alpha_abs_err_density_13": float(abs(dens[0] / d13 - a)) if d13 > 0 else np.nan,
+        "t7_share_end_v1v3": float(e13 / end_counts.sum()) if end_counts.sum() > 0 else np.nan,
+        "t7_alpha_rec_end_13": float(end_counts[0] / e13) if e13 > 0 else np.nan,
+        "t7_alpha_abs_err_end_13": float(abs(end_counts[0] / e13 - a)) if e13 > 0 else np.nan,
+        "t7_track_error_mean": float(np.mean(errs)) if errs else np.nan,
+        "t7_track_error_median": float(np.median(errs)) if errs else np.nan,
+        "t7_completion_rate": float(np.mean(full)) if full else 0.0,
+        "t7_sec_per_traj": float(np.mean(elapsed)) if elapsed else np.nan,
+        "t7_n_samples": int(n_samples), "t7_n_features": int(n_features),
+        "t7_samples_per_feature": float(n_samples / n_features),
+    }
+    for i, nm in enumerate(names):
+        row[f"t7_density_{nm}"] = float(dens[i])
+    return row
+
+
 def build_multivariate_case(
     alpha_mix=0.6,
     T=40,
@@ -143,7 +255,12 @@ def build_multivariate_case(
     sigma_B=0.10,
     clip_to_positive=True,
     seed=GLOBAL_SEED,
+    n_noise=0,
+    n_decoy=0,
+    n_moving=0,
 ):
+    """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
+    (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars."""
     time_coord = pd.date_range("2001-01-01", periods=T, freq="D")
 
     Y_MIN, Y_MAX = 0, 200
@@ -226,11 +343,20 @@ def build_multivariate_case(
     full_data_B = build_dataarray("B", B, time_coord, ys, xs)
     full_data_C = build_dataarray("C", C, time_coord, ys, xs)
 
-    full_data_run = xr.concat([full_data_A, full_data_B, full_data_C], dim="var")
+    extra_list, extra_info = [], []
+    if (n_noise + n_decoy + n_moving) > 0:
+        extra_list, extra_info = _build_extra_vars(
+            A, C, (event_y, event_x), time_coord, ys, xs, x2d, y2d, T, t0,
+            n_noise=n_noise, n_decoy=n_decoy, n_moving=n_moving,
+            sig_y=sig_y, sig_x=sig_x, seed=seed, clip_to_positive=clip_to_positive,
+        )
+
+    full_data_run = xr.concat([full_data_A, full_data_B, full_data_C] + extra_list, dim="var")
     full_data_run = full_data_run.rename({"y": "lat", "x": "lon"})
     date_end = str(time_coord[-1].date())
 
     case = dict(
+        extra_vars=extra_info,
         full_data_run=full_data_run,
         A=A,
         B=B,
@@ -1040,8 +1166,12 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 # -----------------------------------------------------------------------------
 # Evaluate one configuration across all prescribed mixture strengths
 # -----------------------------------------------------------------------------
-def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED):
+def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
+                                      extra_vars=None, strength_mode="native"):
     params = build_params_from_trial_multivar(trial)
+    if strength_mode != "native":
+        params["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
+    extra_vars = dict(extra_vars or {})
 
     rows_alpha = []
     rows_members = []
@@ -1053,6 +1183,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             T=40,
             N_inject=8,
             seed=GLOBAL_SEED,
+            **extra_vars,
         )
 
         ensemble_out = run_ensemble(
@@ -1074,6 +1205,10 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             "estimated_alpha_end": row["end_frac_var1"],
             "estimated_alpha_density": row["density_frac_var1"],
         }
+        if sum(extra_vars.values()) > 0:
+            row_alpha.update(summarize_all_vars(case, ensemble_out, params))
+        if strength_mode != "native":
+            row_alpha["strength_mode"] = str(strength_mode)
         rows_alpha.append(row_alpha)
 
         dfm = summary["df_members"].copy()
@@ -1165,7 +1300,8 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
 # -----------------------------------------------------------------------------
 # Multiprocessing wrapper for one hyperparameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED):
+def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
+                          extra_vars=None, strength_mode="native"):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1176,6 +1312,8 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED
             alpha_grid=alpha_grid,
             M=M,
             seed=seed,
+            extra_vars=extra_vars,
+            strength_mode=strength_mode,
         )
 
         trial_row = out["trial_row"]
@@ -1261,6 +1399,14 @@ def parse_args():
     parser.add_argument("--ensemble-size", type=int, default=30, help="Ensemble members per alpha_mix")
     parser.add_argument("--seed", type=int, default=SEARCH_SEED, help="Search seed")
     parser.add_argument("--flush-every", type=int, default=10, help="Write snapshot every N completed trials")
+    # revision-1 opt-in flags (defaults = original behaviour)
+    parser.add_argument("--alpha-grid", type=float, nargs="+", default=None,
+                        help="alpha_mix values (default: ALPHA_MIX_GRID)")
+    parser.add_argument("--n-noise", type=int, default=0, help="T7: extra independent AR(1) noise variables")
+    parser.add_argument("--n-decoy", type=int, default=0, help="T7: extra decoy variables driven by A or C")
+    parser.add_argument("--n-moving", type=int, default=0, help="T7: extra independent moving-blob variables")
+    parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
+                        help="T9: link-strength definition passed to run_track")
     return parser.parse_args()
 
 
@@ -1297,7 +1443,9 @@ def main():
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),
         "flush_every": int(args.flush_every),
-        "alpha_mix_grid": [float(x) for x in ALPHA_MIX_GRID],
+        "alpha_mix_grid": [float(x) for x in (args.alpha_grid or ALPHA_MIX_GRID)],
+        "extra_vars": dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving),
+        "strength_mode": args.strength_mode,
         "n_total_trials": len(all_jobs),
         "n_completed_trials_found_at_start": len(completed_ids),
         "n_pending_trials_at_start": len(pending_jobs),
@@ -1362,9 +1510,11 @@ def main():
             ex.submit(
                 evaluate_trial_worker,
                 job,
-                ALPHA_MIX_GRID,
+                (args.alpha_grid or ALPHA_MIX_GRID),
                 args.ensemble_size,
                 args.seed,
+                dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving),
+                args.strength_mode,
             )
             for job in pending_jobs
         ]
