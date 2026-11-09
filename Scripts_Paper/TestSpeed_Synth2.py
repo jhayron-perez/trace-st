@@ -58,10 +58,29 @@ OUTDIR_ELASTICNET = Path("/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSy
 OUTDIR_PCMCI = Path("/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/multivariate_v5")
 
 SPEED_OUTDIR = Path("/glade/derecho/scratch/jhayron/DataCaStLeBTs/ResultsSynthetic/speed_benchmark_v1")
-SPEED_OUTDIR.mkdir(parents=True, exist_ok=True)
 
 ALPHA_TEST = 0.6
 M_TEST = 1
+GEOMETRY = ("4d", 20, 3)  # forced timewindow, box_size, radius (paper benchmark)
+PCMCI_STRENGTH_MODES = ["native"]
+OUT_TAG = "M5"
+
+# revision-1 config block (T3r); defaults = original benchmark
+import argparse  # noqa: E402
+_ap = argparse.ArgumentParser(description="TraCE-ST engine timing benchmark")
+_ap.add_argument("--outdir", default=str(SPEED_OUTDIR))
+_ap.add_argument("--m-test", type=int, default=M_TEST)
+_ap.add_argument("--geometry", nargs=3, default=None, metavar=("TIMEWINDOW", "BOX_SIZE", "RADIUS"))
+_ap.add_argument("--pcmci-strength-modes", nargs="+", default=PCMCI_STRENGTH_MODES, choices=["native", "refit"])
+_ap.add_argument("--tag", default=OUT_TAG, help="output file suffix speed_benchmark_multivar_<tag>")
+_A, _ = _ap.parse_known_args()
+SPEED_OUTDIR = Path(_A.outdir)
+M_TEST = int(_A.m_test)
+if _A.geometry is not None:
+    GEOMETRY = (str(_A.geometry[0]), float(_A.geometry[1]), int(_A.geometry[2]))
+PCMCI_STRENGTH_MODES = list(_A.pcmci_strength_modes)
+OUT_TAG = str(_A.tag)
+SPEED_OUTDIR.mkdir(parents=True, exist_ok=True)
 N_STEPS_TIME = 30
 TIMEOUT_PER_METHOD_SEC = 2 * 3600  # 2 hours per method; adjust if desired
 GLOBAL_SEED = 11
@@ -303,9 +322,9 @@ def apply_shared_hyperparams(p, row):
             p[k] = row[k]
 
     # Force smaller/faster common TraCE-ST geometry for speed benchmark
-    p["timewindow"] = "4d"
-    p["box_size"] = 20
-    p["radius"] = 3
+    p["timewindow"] = GEOMETRY[0]
+    p["box_size"] = GEOMETRY[1]
+    p["radius"] = GEOMETRY[2]
 
     p["child_of_interest"] = 2
     p["n_steps_time"] = N_STEPS_TIME
@@ -800,11 +819,14 @@ case = build_multivariate_case(
     seed=GLOBAL_SEED,
 )
 
-benchmarks = [
-    ("elasticnet_granger", params_elasticnet),
-    ("pcmci", params_pcmci),
-    ("dynotears_fast", params_dynotears),
-]
+benchmarks = [("elasticnet_granger", params_elasticnet)]
+for _mode in PCMCI_STRENGTH_MODES:
+    if _mode == "native":
+        benchmarks.append(("pcmci", params_pcmci))
+    else:
+        _pp = copy.deepcopy(params_pcmci); _pp["strength_mode"] = _mode
+        benchmarks.append((f"pcmci_{_mode}", _pp))
+benchmarks.append(("dynotears_fast", params_dynotears))
 
 rows = []
 outs = {}
@@ -831,12 +853,12 @@ df_speed = pd.DataFrame(rows)
 
 print(df_speed)
 
-speed_csv = SPEED_OUTDIR / "speed_benchmark_multivar_M5.csv"
+speed_csv = SPEED_OUTDIR / f"speed_benchmark_multivar_{OUT_TAG}.csv"
 df_speed.to_csv(speed_csv, index=False)
 
-with open(SPEED_OUTDIR / "speed_benchmark_multivar_M5.json", "w") as f:
+with open(SPEED_OUTDIR / f"speed_benchmark_multivar_{OUT_TAG}.json", "w") as f:
     json.dump(rows, f, indent=2, default=str)
 
 print("Saved:")
 print(speed_csv)
-print(SPEED_OUTDIR / "speed_benchmark_multivar_M5.json")
+print(SPEED_OUTDIR / f"speed_benchmark_multivar_{OUT_TAG}.json")
