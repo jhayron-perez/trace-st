@@ -360,7 +360,9 @@ def run_ensemble(case, params, M=30, seed=SEARCH_SEED):
         p["starting_lat"] = float(case["event_lat"])
         p["starting_lon"] = float(case["event_lon_0360"])
 
-        np.random.seed(int(rng_local.integers(0, 2_000_000_000)))
+        member_seed = int(rng_local.integers(0, 2_000_000_000))
+        np.random.seed(member_seed)  # legacy global seed; does not seed default_rng
+        p["seed"] = member_seed  # seeds run_track cluster selection (revision-1)
         t0 = time.perf_counter()
 
         try:

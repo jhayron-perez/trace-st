@@ -157,8 +157,14 @@ def run_track(
     date_end=None,
     return_debug: bool = True,
     return_cluster_summaries: bool = True,
+    rng: Optional[np.random.Generator] = None,
 ):
     """Run TraCE-ST back-trajectory.
+
+    rng : optional np.random.Generator used for Monte Carlo cluster selection.
+        If None and params["seed"] is set, a Generator is built from that seed.
+        If both are None, selection uses a fresh unseeded Generator per step
+        (original behavior).
 
     Key rule (UPDATED):
     - Movement is chosen by directional clustering.
@@ -185,6 +191,8 @@ def run_track(
     beta_softmax = params.get("beta_softmax", 100.0)
     beta_softmax = 100.0 if beta_softmax is None else float(beta_softmax)
     prob_rule = str(params.get("prob_rule", "linear"))
+    if rng is None and params.get("seed", None) is not None:
+        rng = np.random.default_rng(int(params["seed"]))
 
     # Directional clustering knobs
     eps_dbscan = float(params.get("eps_dbscan", 0.5))
@@ -368,6 +376,7 @@ def run_track(
                 montecarlo=montecarlo,
                 beta_softmax=beta_softmax,
                 prob_rule=prob_rule,
+                rng=rng,
                 prefer_sign=prefer_sign,
                 alpha=alpha,
                 score_mode=score_mode,

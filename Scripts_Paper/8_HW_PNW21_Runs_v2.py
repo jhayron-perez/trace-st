@@ -332,17 +332,23 @@ def run_ensemble_tracks(
     start_method="spawn",
     drop_failed=False,
     verbose=True,
+    seed=None,
 ):
     """
     Run an ensemble of TraCE-ST tracks in parallel.
+
+    seed : if not None, member i gets params["seed"] = seed + i, which seeds
+        its cluster-selection rng in run_track (revision-1). None = unseeded.
     """
     if nproc is None:
         nproc = min(n_members, os.cpu_count() or 1)
 
-    args_list = [
-        (full_data, copy.deepcopy(params), date_end, i)
-        for i in range(n_members)
-    ]
+    args_list = []
+    for i in range(n_members):
+        p_i = copy.deepcopy(params)
+        if seed is not None:
+            p_i["seed"] = int(seed) + i
+        args_list.append((full_data, p_i, date_end, i))
 
     ctx = mp.get_context(start_method)
     with ctx.Pool(processes=nproc) as pool:
@@ -878,6 +884,7 @@ def run_hyperparam_ensemble_search(
     windows=((0, 10), (10, 20), (20, 30)),
     window_labels=("days_1_10", "days_11_20", "days_21_30"),
     continue_if_exists=True,
+    seed=None,
 ):
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
@@ -916,6 +923,7 @@ def run_hyperparam_ensemble_search(
             start_method=start_method,
             drop_failed=False,
             verbose=verbose,
+            seed=None if seed is None else int(seed) + 1000 * run_id,
         )
 
         summary = summarize_ensemble_results(
@@ -1002,6 +1010,7 @@ def main():
         windows=((0, 10), (10, 20), (20, 30)),
         window_labels=("days_1_10", "days_11_20", "days_21_30"),
         continue_if_exists=args.continue_if_exists,
+        seed=args.seed,
     )
 
     print("\nFinished.", flush=True)
