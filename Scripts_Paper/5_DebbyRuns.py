@@ -120,7 +120,8 @@ def canonicalize_for_json(obj):
 # -----------------------------------------------------------------------------
 # Event fields and independent IBTrACS reference track
 # -----------------------------------------------------------------------------
-def load_debby_data(path_files_debby=PATH_FILES_DEBBY):
+def load_debby_data(path_files_debby=PATH_FILES_DEBBY, extra_inputs=None):
+    """extra_inputs (revision-1 T8, opt-in): list of (name, path, varname) appended after precip."""
     var_tb = xr.open_dataset(f"{path_files_debby}/BT_anomalies_TC_argon.nc4").Tb
     var_vo = xr.open_dataset(f"{path_files_debby}/Vo_anomalies_TC_500-700.nc4").vo
     var_pr = xr.open_dataset(f"{path_files_debby}/P_anomalies_TC_argon2.nc4").precipitation
@@ -138,9 +139,17 @@ def load_debby_data(path_files_debby=PATH_FILES_DEBBY):
     var_vo = var_vo.assign_coords(time=var_vo.time.dt.round("1H"))
     var_pr = var_pr.assign_coords(time=var_pr.time.dt.round("1H"))
 
+    extras, extra_names = [], []
+    for name, path, varname in (extra_inputs or []):
+        da = xr.open_dataset(path)[varname]
+        da = da.rename({k: v for k, v in {"latitude": "lat", "longitude": "lon"}.items() if k in da.dims})
+        da = da.assign_coords(time=da.time.dt.round("1H"))
+        extras.append(da)
+        extra_names.append(str(name))
+
     full_data = xr.concat(
-        [var_tb, var_vo, var_pr],
-        dim=xr.IndexVariable("var", ["Tb", "vo", "precip"]),
+        [var_tb, var_vo, var_pr] + extras,
+        dim=xr.IndexVariable("var", ["Tb", "vo", "precip"] + extra_names),
     )
     full_data = full_data.assign_coords(lon=(full_data.lon % 360)).sortby("lon")
     return full_data
@@ -182,8 +191,8 @@ def load_debby_observed_track(
     )
 
 
-def build_case_debby():
-    full_data = load_debby_data()
+def build_case_debby(extra_inputs=None):
+    full_data = load_debby_data(extra_inputs=extra_inputs)
     obs_track = load_debby_observed_track()
 
     params_base = dict(
@@ -566,14 +575,10 @@ def _integrated_density_by_parent(
     density_steps_by_parent=None,
 ):
     if density_steps_by_parent is None or start_step is None or end_step_exclusive is None:
-        return {
-            1: float(np.nansum(density_by_parent[1])),
-            2: float(np.nansum(density_by_parent[2])),
-            3: float(np.nansum(density_by_parent[3])),
-        }
+        return {p: float(np.nansum(density_by_parent[p])) for p in sorted(density_by_parent)}
 
     out = {}
-    for p in [1, 2, 3]:
+    for p in sorted(density_by_parent):
         dens = np.zeros_like(density_by_parent[p], dtype=float)
         for step_i, arr in density_steps_by_parent[p]:
             if step_i >= start_step and step_i < end_step_exclusive:
@@ -598,14 +603,11 @@ def summarize_ensemble_debby(
     box_size = float(params["box_size"])
     dt_hours = get_timeres_hours(params["timeres"])
 
-    density_by_parent = {
-        1: np.zeros(shape2d, dtype=float),
-        2: np.zeros(shape2d, dtype=float),
-        3: np.zeros(shape2d, dtype=float),
-    }
-    density_steps_by_parent = {1: [], 2: [], 3: []}
+    var_ids = list(range(1, len(case["var_names"]) + 1))  # [1, 2, 3] for the paper case
+    density_by_parent = {p: np.zeros(shape2d, dtype=float) for p in var_ids}
+    density_steps_by_parent = {p: [] for p in var_ids}
 
-    end_parent_counts = {1: 0, 2: 0, 3: 0}
+    end_parent_counts = {p: 0 for p in var_ids}
     n_ok = 0
     rows = []
 
@@ -683,7 +685,7 @@ def summarize_ensemble_debby(
     total_end = sum(end_parent_counts.values())
     end_parent_frac = {
         p: (end_parent_counts[p] / total_end if total_end > 0 else np.nan)
-        for p in [1, 2, 3]
+        for p in var_ids
     }
 
     density_full = _integrated_density_by_parent(
@@ -1067,8 +1069,8 @@ def filter_pending_trials(all_jobs, completed_ids):
 # -----------------------------------------------------------------------------
 # Evaluate one physically admissible parameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED):
-    case = build_case_debby()
+def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None):
+    case = build_case_debby(extra_inputs=extra_inputs)
     params = build_params_from_trial_debby(trial, case)
 
     ensemble_out = run_ensemble(
@@ -1113,7 +1115,7 @@ def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED):
 # -----------------------------------------------------------------------------
 # Multiprocessing wrapper for one parameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED):
+def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1123,6 +1125,7 @@ def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED):
             trial=trial,
             ensemble_size=ensemble_size,
             seed=seed,
+            extra_inputs=extra_inputs,
         )
 
         trial_row = out["trial_row"]
@@ -1222,6 +1225,11 @@ def parse_args():
     parser.add_argument("--ensemble-size", type=int, default=30, help="Ensemble members per trial")
     parser.add_argument("--seed", type=int, default=SEARCH_SEED, help="Search seed")
     parser.add_argument("--flush-every", type=int, default=10, help="Write snapshot every N completed trials")
+    # revision-1 opt-in (T8); defaults = original
+    parser.add_argument("--extra-inputs", type=str, nargs="+", default=None,
+                        help="Extra variables NAME=PATH:VARNAME appended after precip")
+    parser.add_argument("--trial-ids", type=int, nargs="+", default=None,
+                        help="Run only these trial ids (configs still drawn for all --n-trials)")
     return parser.parse_args()
 
 
@@ -1244,6 +1252,15 @@ def main():
     summary_path = outdir / "run_summary.json"
 
     all_jobs = build_debby_jobs(n_trials=args.n_trials, seed=args.seed)
+    if args.trial_ids is not None:
+        all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
+    extra_inputs = None
+    if args.extra_inputs:
+        extra_inputs = []
+        for item in args.extra_inputs:
+            name, rest = item.split("=", 1)
+            path, varname = rest.rsplit(":", 1)
+            extra_inputs.append((name, path, varname))
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
     pending_jobs = filter_pending_trials(all_jobs, completed_ids)
@@ -1324,6 +1341,7 @@ def main():
                 job,
                 args.ensemble_size,
                 args.seed,
+                extra_inputs,
             )
             for job in pending_jobs
         ]

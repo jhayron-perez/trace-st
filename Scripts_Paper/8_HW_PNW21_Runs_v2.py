@@ -106,11 +106,29 @@ def regrid_to_2p5(full_data: xr.DataArray) -> xr.DataArray:
     return full_data_2p5
 
 
-def build_case_pnw(var_combo: List[str] | None = None) -> dict:
+def load_placebo_vars(varstems: List[str], year: int) -> xr.DataArray:
+    """Revision-1 T8 placebos: same calendar window and anomaly files, taken from `year`,
+    time coordinate relabeled to 2021; variables named '<NAME>_P<year>'."""
+    ts = tuple(t.replace("2021", str(int(year))) for t in TIME_SLICE)
+    da = tst.data_io.load_full_data(
+        path_files=PATH_FILES,
+        varstems=varstems,
+        list_names_vars=[f"{VAR_NAME_MAP[v]}_P{int(year)}" for v in varstems],
+        time_slice=ts,
+        join="inner",
+    )
+    t = pd.to_datetime(da.time.values)
+    return da.assign_coords(time=[x.replace(year=2021) for x in t])
+
+
+def build_case_pnw(var_combo: List[str] | None = None, placebo_vars=None, placebo_year=2010) -> dict:
     if var_combo is None:
         var_combo = VAR_COMBOS[0]
 
     full_data = load_full_data_for_vars(var_combo)
+    if placebo_vars:
+        plc = load_placebo_vars(list(placebo_vars), placebo_year)
+        full_data = xr.concat([full_data, plc.transpose(*full_data.dims)], dim="var", join="inner")
     full_data = regrid_to_2p5(full_data)
 
     params_base = dict(
@@ -972,6 +990,12 @@ def parse_args():
         choices=["spawn", "fork", "forkserver"],
         help="Multiprocessing start method",
     )
+    # revision-1 opt-in (T8); defaults = original
+    parser.add_argument("--placebo-vars", type=str, nargs="+", default=None,
+                        help="Var stems to add as wrong-year placebos (e.g. z500 tcwv)")
+    parser.add_argument("--placebo-year", type=int, default=2010, help="Source year of the placebos")
+    parser.add_argument("--run-ids", type=int, nargs="+", default=None,
+                        help="Run only these run ids (configs still drawn for all --n-trials)")
     parser.add_argument(
         "--continue-if-exists",
         action="store_true",
@@ -984,7 +1008,7 @@ def main():
     args = parse_args()
 
     print("Loading PNW21 data...", flush=True)
-    case = build_case_pnw()
+    case = build_case_pnw(placebo_vars=args.placebo_vars, placebo_year=args.placebo_year)
     full_data_run = case["full_data"]
 
     print(full_data_run, flush=True)
@@ -995,6 +1019,8 @@ def main():
     print("Sampling hyperparameters...", flush=True)
     jobs = build_pnw_jobs(n_trials=args.n_trials, seed=args.seed)
     param_samples = [trial for _, trial in jobs]
+    if args.run_ids is not None:
+        param_samples = [t for t in param_samples if int(t["run_id"]) in set(args.run_ids)]
 
     print(f"Number of hyperparameter samples: {len(param_samples)}", flush=True)
     print("First sample:", param_samples[0], flush=True)
