@@ -1171,8 +1171,11 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 # -----------------------------------------------------------------------------
 # Evaluate one method/configuration across all mixture strengths
 # -----------------------------------------------------------------------------
-def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED):
+def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED,
+                                      strength_mode="native"):
     params = build_params_from_trial_multivar(method, trial)
+    if strength_mode != "native":
+        params["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
 
     rows_alpha = []
     rows_members = []
@@ -1308,7 +1311,7 @@ def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_
 # -----------------------------------------------------------------------------
 # Multiprocessing wrapper for one method/configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED):
+def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED, strength_mode="native"):
     method, trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1320,6 +1323,7 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED
             alpha_grid=alpha_grid,
             M=M,
             seed=seed,
+            strength_mode=strength_mode,
         )
 
         trial_row = out["trial_row"]
@@ -1411,6 +1415,8 @@ def parse_args():
     parser.add_argument("--methods", type=str, nargs="+", default=None,
                         help="Subset of METHODS to run (default: all). Configs are drawn for all "
                              "methods first, so a subset gets the same configs as the full run.")
+    parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
+                        help="revision-1 T9: link-strength definition passed to run_track")
     return parser.parse_args()
 
 
@@ -1450,6 +1456,8 @@ def main():
     meta = {
         "seed": int(args.seed),
         "methods": METHODS,
+        "methods_run": args.methods,
+        "strength_mode": args.strength_mode,
         "trials_per_method": int(args.trials_per_method),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),
@@ -1536,6 +1544,7 @@ def main():
                 ALPHA_MIX_GRID,
                 args.ensemble_size,
                 args.seed,
+                args.strength_mode,
             )
             for job in pending_jobs
         ]

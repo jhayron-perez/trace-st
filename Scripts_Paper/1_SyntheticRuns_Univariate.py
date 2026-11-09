@@ -624,7 +624,7 @@ def filter_pending_jobs(all_jobs, completed_keys):
 # -----------------------------------------------------------------------------
 # One independent hyperparameter evaluation
 # -----------------------------------------------------------------------------
-def evaluate_job(job):
+def evaluate_job(job, strength_mode="native"):
     method, trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -662,6 +662,9 @@ def evaluate_job(job):
         pbase["snap_to_grid"] = False
         pbase["averaging_winners"] = True
         pbase["verbose"] = False
+
+        if strength_mode != "native":
+            pbase["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
 
         if method == "granger":
             pbase["cd_kwargs"]["lambda_a"] = trial["lambda_a"]
@@ -790,6 +793,8 @@ def parse_args():
     parser.add_argument("--n-workers", type=int, default=128, help="Parallel workers")
     parser.add_argument("--seed", type=int, default=SEARCH_SEED, help="Search seed")
     parser.add_argument("--flush-every", type=int, default=25, help="Write snapshot every N completed jobs")
+    parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
+                        help="revision-1 T9: link-strength definition passed to run_track")
     return parser.parse_args()
 
 
@@ -821,6 +826,7 @@ def main():
         "n_completed_jobs_found_at_start": len(completed_keys),
         "n_pending_jobs_at_start": len(pending_jobs),
         "methods": ["granger", "pcmci", "dynotears"],
+        "strength_mode": args.strength_mode,
         "updated_at": pd.Timestamp.utcnow().isoformat(),
     }
     atomic_write_json(meta_path, meta)
@@ -875,7 +881,7 @@ def main():
     ctx = mp.get_context("spawn")
 
     with ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx) as ex:
-        futures = [ex.submit(evaluate_job, job) for job in pending_jobs]
+        futures = [ex.submit(evaluate_job, job, args.strength_mode) for job in pending_jobs]
 
         for fut in as_completed(futures):
             result = fut.result()
