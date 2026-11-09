@@ -184,6 +184,7 @@ def run_track(
     montecarlo = bool(params.get("montecarlo", False))
     beta_softmax = params.get("beta_softmax", 100.0)
     beta_softmax = 100.0 if beta_softmax is None else float(beta_softmax)
+    prob_rule = str(params.get("prob_rule", "linear"))
 
     # Directional clustering knobs
     eps_dbscan = float(params.get("eps_dbscan", 0.5))
@@ -366,6 +367,7 @@ def run_track(
                 min_samples=min_samples_dbscan,
                 montecarlo=montecarlo,
                 beta_softmax=beta_softmax,
+                prob_rule=prob_rule,
                 prefer_sign=prefer_sign,
                 alpha=alpha,
                 score_mode=score_mode,
