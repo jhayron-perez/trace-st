@@ -1,0 +1,124 @@
+"""Build extra Debby 2006 input fields from ERA5 (RDA ds633.0 on GLADE), matching FilesDebby/*.
+
+Revision-1 (R1 major 1, DECISIONS 2026-11-04). The original FilesDebby preprocessing
+script is not on Derecho (K12), so this reconstructs it and must first reproduce
+Vo_anomalies_TC_500-700.nc4 (validation mode).
+
+Grid/domain as FilesDebby: 0.25 deg, lat 40 -> 0 (161, descending), lon -50 -> 40 (361).
+Time: hourly; output window 2006-08-11 00:00 .. 2006-08-28 23:00 (432 steps).
+Anomaly: per grid cell, standardized with mean and sd over JUL-SEP of the same year;
+--stdz hour: separately for each hour of day (default), --stdz all: over all JAS hours.
+Year shift (placebo): --year 2005 --relabel-year 2006 takes the same calendar dates
+from 2005 (with 2005 JAS stats) and relabels the time coordinate to 2006.
+
+Fields (--field):
+  vo500700 : relative vorticity, mean over --levels (default 500 550 600 650 700 hPa)
+  d200     : divergence at 200 hPa (--levels 200)
+  cape     : CAPE (surface analysis)
+
+Usage:
+  python make_debby_extra_inputs.py --field vo500700 --year 2006 --out OUT.nc [--nproc 8]
+"""
+import argparse
+import multiprocessing as mp
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+RDA = Path("/glade/campaign/collections/rda/data/d633000")
+LAT = np.arange(40.0, -0.001, -0.25)          # 161
+LON = np.arange(-50.0, 40.001, 0.25)          # 361
+WIN = ("08-11 00:00", "08-28 23:00")
+
+SPEC = {
+    "vo500700": dict(kind="pl", code="128_138_vo", var="VO", out="vo", levels=[500, 550, 600, 650, 700]),
+    "d200": dict(kind="pl", code="128_155_d", var="D", out="d", levels=[200]),
+    "cape": dict(kind="sfc", code="128_059_cape", var="CAPE", out="cape", levels=None),
+}
+
+
+def _subset(da):
+    da = da.sel(latitude=slice(40.0, 0.0))
+    lon = ((da.longitude + 180.0) % 360.0) - 180.0
+    da = da.assign_coords(longitude=lon).sortby("longitude").sel(longitude=slice(-50.0, 40.0))
+    return da
+
+
+def _read_pl_day(args):
+    code, var, levels, day = args
+    f = RDA / "e5.oper.an.pl" / day.strftime("%Y%m") / (
+        f"e5.oper.an.pl.{code}.ll025sc.{day:%Y%m%d}00_{day:%Y%m%d}23.nc")
+    with xr.open_dataset(f) as ds:
+        da = _subset(ds[var].sel(level=levels)).mean("level").load()
+    return da.astype("float64")
+
+
+def _read_sfc_month(args):
+    code, var, month = args
+    end = (month + pd.offsets.MonthEnd(0))
+    f = RDA / "e5.oper.an.sfc" / month.strftime("%Y%m") / (
+        f"e5.oper.an.sfc.{code}.ll025sc.{month:%Y%m}0100_{end:%Y%m%d}23.nc")
+    with xr.open_dataset(f) as ds:
+        da = _subset(ds[var]).load()
+    return da.astype("float64")
+
+
+def load_jas(field, year, levels=None, nproc=8):
+    s = SPEC[field]
+    lev = levels if levels is not None else s["levels"]
+    with mp.get_context("fork").Pool(nproc) as pool:
+        if s["kind"] == "pl":
+            days = pd.date_range(f"{year}-07-01", f"{year}-09-30", freq="D")
+            parts = pool.map(_read_pl_day, [(s["code"], s["var"], lev, d) for d in days])
+        else:
+            months = pd.date_range(f"{year}-07-01", f"{year}-09-01", freq="MS")
+            parts = pool.map(_read_sfc_month, [(s["code"], s["var"], m) for m in months])
+    da = xr.concat(parts, "time")
+    assert da.sizes["latitude"] == 161 and da.sizes["longitude"] == 361, da.sizes
+    return da
+
+
+def standardize(da, stdz="hour"):
+    if stdz == "hour":
+        g = da.groupby("time.hour")
+        return (g - g.mean("time")).groupby("time.hour") / da.groupby("time.hour").std("time")
+    return (da - da.mean("time")) / da.std("time")
+
+
+def build(field, year, relabel_year=2006, stdz="hour", levels=None, nproc=8):
+    da = load_jas(field, year, levels=levels, nproc=nproc)
+    an = standardize(da, stdz)
+    an = an.sel(time=slice(f"{year}-{WIN[0]}", f"{year}-{WIN[1]}"))
+    if relabel_year != year:
+        t = pd.to_datetime(an.time.values)
+        an = an.assign_coords(time=[ts.replace(year=relabel_year) for ts in t])
+    an = an.drop_vars([c for c in an.coords if c not in ("time", "latitude", "longitude")])
+    an = an.assign_coords(hour=("time", pd.to_datetime(an.time.values).hour.astype("int64")))
+    out = an.astype("float32").rename(SPEC[field]["out"])
+    out.attrs = dict(source="ERA5 ds633.0 " + SPEC[field]["code"], year_source=int(year),
+                     year_label=int(relabel_year), levels_hPa=str(levels or SPEC[field]["levels"]),
+                     standardization=f"per grid cell, JAS {year}, by={stdz}")
+    assert out.sizes["time"] == 432, out.sizes
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--field", required=True, choices=list(SPEC))
+    ap.add_argument("--year", type=int, default=2006)
+    ap.add_argument("--relabel-year", type=int, default=2006)
+    ap.add_argument("--stdz", choices=["hour", "all"], default="hour")
+    ap.add_argument("--levels", type=float, nargs="+", default=None)
+    ap.add_argument("--nproc", type=int, default=8)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    out = build(a.field, a.year, a.relabel_year, a.stdz, a.levels, a.nproc)
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    out.to_dataset().to_netcdf(a.out)
+    print("wrote", a.out, dict(out.sizes))
+
+
+if __name__ == "__main__":
+    main()
