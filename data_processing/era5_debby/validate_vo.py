@@ -1,7 +1,7 @@
 """Validation (blocking for Debby T8): rebuild the 2006 500-700 hPa vorticity anomaly and compare
 with FilesDebby/Vo_anomalies_TC_500-700.nc4 for several candidate recipes.
 
-python validate_vo.py OUTDIR [NPROC]
+python validate_vo.py OUTDIR CACHE_DIR
 """
 import json
 import sys
@@ -15,12 +15,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 import make_debby_extra_inputs as mk  # noqa: E402
 
 REF = "/glade/work/jhayron/trace-st_data/original_submission/FilesDebby/Vo_anomalies_TC_500-700.nc4"
-out = Path(sys.argv[1]); nproc = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+out = Path(sys.argv[1]); cache = sys.argv[2]
 ref = xr.open_dataset(REF).vo.load()
 ref = ref.assign_coords(time=ref.time.dt.round("1h"))
 res = {}
 for name, lev in {"lev5_500-700by50": [500, 550, 600, 650, 700], "lev3_500-600-700": [500, 600, 700]}.items():
-    raw = mk.load_jas("vo500700", 2006, levels=lev, nproc=nproc)
+    raw = mk.load_jas("vo500700", 2006, levels=lev, cache=cache)
     for stdz in ("hour", "all"):
         an = mk.standardize(raw, stdz).sel(time=slice("2006-08-11 00:00", "2006-08-28 23:00"))
         a = an.values.astype(float); b = ref.values.astype(float)

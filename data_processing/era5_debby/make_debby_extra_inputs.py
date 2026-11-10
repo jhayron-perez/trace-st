@@ -65,7 +65,29 @@ def _read_sfc_month(args):
     return da.astype("float64")
 
 
-def load_jas(field, year, levels=None, nproc=8):
+def load_jas_cache(field, year, cache, levels=None):
+    """Read JAS of `year` from the extract_cache.py cache (preferred; one read of ERA5 per day)."""
+    s = SPEC[field]
+    lev = levels if levels is not None else s["levels"]
+    if s["kind"] == "pl":
+        files = [Path(cache) / f"{s['code']}_{d:%Y%m%d}.nc" for d in pd.date_range(f"{year}-07-01", f"{year}-09-30", freq="D")]
+    else:
+        files = [Path(cache) / f"{s['code']}_{m:%Y%m}.nc" for m in pd.date_range(f"{year}-07-01", f"{year}-09-01", freq="MS")]
+    parts = []
+    for f in files:
+        with xr.open_dataset(f) as ds:
+            da = ds[s["var"]]
+            if lev is not None:
+                da = da.sel(level=lev).mean("level")
+            parts.append(da.load().astype("float64"))
+    da = xr.concat(parts, "time")
+    assert da.sizes["latitude"] == 161 and da.sizes["longitude"] == 361, da.sizes
+    return da
+
+
+def load_jas(field, year, levels=None, nproc=8, cache=None):
+    if cache is not None:
+        return load_jas_cache(field, year, cache, levels=levels)
     s = SPEC[field]
     lev = levels if levels is not None else s["levels"]
     with mp.get_context("fork").Pool(nproc) as pool:
@@ -87,8 +109,8 @@ def standardize(da, stdz="hour"):
     return (da - da.mean("time")) / da.std("time")
 
 
-def build(field, year, relabel_year=2006, stdz="hour", levels=None, nproc=8):
-    da = load_jas(field, year, levels=levels, nproc=nproc)
+def build(field, year, relabel_year=2006, stdz="hour", levels=None, nproc=8, cache=None):
+    da = load_jas(field, year, levels=levels, nproc=nproc, cache=cache)
     an = standardize(da, stdz)
     an = an.sel(time=slice(f"{year}-{WIN[0]}", f"{year}-{WIN[1]}"))
     if relabel_year != year:
@@ -112,9 +134,10 @@ def main():
     ap.add_argument("--stdz", choices=["hour", "all"], default="hour")
     ap.add_argument("--levels", type=float, nargs="+", default=None)
     ap.add_argument("--nproc", type=int, default=8)
+    ap.add_argument("--cache", default=None, help="extract_cache.py output dir")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    out = build(a.field, a.year, a.relabel_year, a.stdz, a.levels, a.nproc)
+    out = build(a.field, a.year, a.relabel_year, a.stdz, a.levels, a.nproc, a.cache)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     out.to_dataset().to_netcdf(a.out)
     print("wrote", a.out, dict(out.sizes))
