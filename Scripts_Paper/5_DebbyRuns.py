@@ -120,10 +120,13 @@ def canonicalize_for_json(obj):
 # -----------------------------------------------------------------------------
 # Event fields and independent IBTrACS reference track
 # -----------------------------------------------------------------------------
-def load_debby_data(path_files_debby=PATH_FILES_DEBBY, extra_inputs=None):
+def load_debby_data(path_files_debby=PATH_FILES_DEBBY, extra_inputs=None, vo_input=None):
     """extra_inputs (revision-1 T8, opt-in): list of (name, path, varname) appended after precip."""
     var_tb = xr.open_dataset(f"{path_files_debby}/BT_anomalies_TC_argon.nc4").Tb
-    var_vo = xr.open_dataset(f"{path_files_debby}/Vo_anomalies_TC_500-700.nc4").vo
+    if vo_input is None:
+        var_vo = xr.open_dataset(f"{path_files_debby}/Vo_anomalies_TC_500-700.nc4").vo
+    else:  # revision-1 opt-in: (path, varname) replacing the vorticity field
+        var_vo = xr.open_dataset(vo_input[0])[vo_input[1]]
     var_pr = xr.open_dataset(f"{path_files_debby}/P_anomalies_TC_argon2.nc4").precipitation
 
     # Select the precipitation hour coordinate matching each valid timestamp.
@@ -191,8 +194,8 @@ def load_debby_observed_track(
     )
 
 
-def build_case_debby(extra_inputs=None):
-    full_data = load_debby_data(extra_inputs=extra_inputs)
+def build_case_debby(extra_inputs=None, vo_input=None):
+    full_data = load_debby_data(extra_inputs=extra_inputs, vo_input=vo_input)
     obs_track = load_debby_observed_track()
 
     params_base = dict(
@@ -1069,8 +1072,8 @@ def filter_pending_trials(all_jobs, completed_ids):
 # -----------------------------------------------------------------------------
 # Evaluate one physically admissible parameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None):
-    case = build_case_debby(extra_inputs=extra_inputs)
+def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None, vo_input=None):
+    case = build_case_debby(extra_inputs=extra_inputs, vo_input=vo_input)
     params = build_params_from_trial_debby(trial, case)
 
     ensemble_out = run_ensemble(
@@ -1115,7 +1118,7 @@ def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, ex
 # -----------------------------------------------------------------------------
 # Multiprocessing wrapper for one parameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None):
+def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None, vo_input=None):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1126,6 +1129,7 @@ def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=
             ensemble_size=ensemble_size,
             seed=seed,
             extra_inputs=extra_inputs,
+            vo_input=vo_input,
         )
 
         trial_row = out["trial_row"]
@@ -1228,6 +1232,8 @@ def parse_args():
     # revision-1 opt-in (T8); defaults = original
     parser.add_argument("--extra-inputs", type=str, nargs="+", default=None,
                         help="Extra variables NAME=PATH:VARNAME appended after precip")
+    parser.add_argument("--vo-input", type=str, default=None,
+                        help="Replace the vorticity field: PATH:VARNAME (default: FilesDebby/Vo_anomalies_TC_500-700.nc4)")
     parser.add_argument("--trial-ids", type=int, nargs="+", default=None,
                         help="Run only these trial ids (configs still drawn for all --n-trials)")
     return parser.parse_args()
@@ -1261,6 +1267,7 @@ def main():
             name, rest = item.split("=", 1)
             path, varname = rest.rsplit(":", 1)
             extra_inputs.append((name, path, varname))
+    vo_input = None if args.vo_input is None else tuple(args.vo_input.rsplit(":", 1))
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
     pending_jobs = filter_pending_trials(all_jobs, completed_ids)
@@ -1342,6 +1349,7 @@ def main():
                 args.ensemble_size,
                 args.seed,
                 extra_inputs,
+                vo_input,
             )
             for job in pending_jobs
         ]

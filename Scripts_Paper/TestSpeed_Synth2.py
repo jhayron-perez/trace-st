@@ -73,6 +73,8 @@ _ap.add_argument("--m-test", type=int, default=M_TEST)
 _ap.add_argument("--geometry", nargs=3, default=None, metavar=("TIMEWINDOW", "BOX_SIZE", "RADIUS"))
 _ap.add_argument("--pcmci-strength-modes", nargs="+", default=PCMCI_STRENGTH_MODES, choices=["native", "refit"])
 _ap.add_argument("--tag", default=OUT_TAG, help="output file suffix speed_benchmark_multivar_<tag>")
+_ap.add_argument("--engines", nargs="+", default=None, help="subset of benchmark names to run (default: all)")
+_ap.add_argument("--timeout-sec", type=float, default=None, help="per-method timeout (default 7200)")
 _A, _ = _ap.parse_known_args()
 SPEED_OUTDIR = Path(_A.outdir)
 M_TEST = int(_A.m_test)
@@ -830,6 +832,11 @@ benchmarks.append(("dynotears_fast", params_dynotears))
 
 rows = []
 outs = {}
+
+if _A.engines is not None:
+    benchmarks = [(n, p) for n, p in benchmarks if n in set(_A.engines)]
+if _A.timeout_sec is not None:
+    TIMEOUT_PER_METHOD_SEC = float(_A.timeout_sec)
 
 for name, params in benchmarks:
     print(f"\nRunning {name}...")

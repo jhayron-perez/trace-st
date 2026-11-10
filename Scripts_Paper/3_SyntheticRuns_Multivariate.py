@@ -127,13 +127,14 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
 
 
 def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
-                      sig_y, sig_x, seed, clip_to_positive=True):
+                      sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1):
     """Revision-1 T7 non-causal variables (none of them enters B's equation).
 
     noise k  : independent smoothed AR(1) field, same construction as the A/C noise
                (make_spatiotemporal_ar1_noise, phi=0.85, sigma=0.10), seed + 100 + k.
     decoy k  : driven by A (k even) or C (k odd) with the T1 (case-1) V2 equation
-               D[t] = 0.8 D[t-1] + 0.8 X[t-1] + AR(1) noise (phi 0.8, sigma 0.1), seed + 200 + k.
+               D[t] = 0.8 D[t-1] + 0.8 X[t-1] + AR(1) noise (phi 0.8, sigma 0.1), seed + 200 + k
+               (defaults; --decoy-phi / --decoy-beta / --decoy-sigma change 0.8 / 0.8 / 0.1).
     moving k : independent Gaussian blob (same size/amplitude as A, C) on a straight Bezier
                track whose closest approach (15 units from the event, perpendicular offset)
                is at t = t0 - 2, i.e. within ~20 units of the event during t0-5..t0;
@@ -148,11 +149,11 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
         out.append(build_dataarray(name, arr, time_coord, ys, xs)); info.append((name, "noise"))
     for k in range(int(n_decoy)):
         X = A if k % 2 == 0 else C
-        nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=0.1, rng=np.random.default_rng(seed + 200 + k))
+        nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=float(decoy_sigma), rng=np.random.default_rng(seed + 200 + k))
         D = np.zeros_like(A, dtype=np.float32)
         D[0] = nz[0]
         for t in range(1, T):
-            D[t] = 0.8 * D[t - 1] + 0.8 * X[t - 1] + nz[t]
+            D[t] = float(decoy_phi) * D[t - 1] + float(decoy_beta) * X[t - 1] + nz[t]
         if clip_to_positive:
             D = np.clip(D, 0.0, None)
         name = f"D{k + 1}_{'A' if k % 2 == 0 else 'C'}"
@@ -258,6 +259,9 @@ def build_multivariate_case(
     n_noise=0,
     n_decoy=0,
     n_moving=0,
+    decoy_phi=0.8,
+    decoy_beta=0.8,
+    decoy_sigma=0.1,
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
     (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars."""
@@ -349,6 +353,7 @@ def build_multivariate_case(
             A, C, (event_y, event_x), time_coord, ys, xs, x2d, y2d, T, t0,
             n_noise=n_noise, n_decoy=n_decoy, n_moving=n_moving,
             sig_y=sig_y, sig_x=sig_x, seed=seed, clip_to_positive=clip_to_positive,
+            decoy_phi=decoy_phi, decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
         )
 
     full_data_run = xr.concat([full_data_A, full_data_B, full_data_C] + extra_list, dim="var")
@@ -1213,7 +1218,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             "estimated_alpha_end": row["end_frac_var1"],
             "estimated_alpha_density": row["density_frac_var1"],
         }
-        if sum(extra_vars.values()) > 0:
+        if sum(extra_vars.get(k, 0) for k in ("n_noise", "n_decoy", "n_moving")) > 0:
             row_alpha.update(summarize_all_vars(case, ensemble_out, params))
         if strength_mode != "native":
             row_alpha["strength_mode"] = str(strength_mode)
@@ -1413,6 +1418,9 @@ def parse_args():
     parser.add_argument("--n-noise", type=int, default=0, help="T7: extra independent AR(1) noise variables")
     parser.add_argument("--n-decoy", type=int, default=0, help="T7: extra decoy variables driven by A or C")
     parser.add_argument("--n-moving", type=int, default=0, help="T7: extra independent moving-blob variables")
+    parser.add_argument("--decoy-phi", type=float, default=0.8, help="T7: decoy memory D[t-1] coefficient")
+    parser.add_argument("--decoy-beta", type=float, default=0.8, help="T7: decoy coupling to A or C at t-1")
+    parser.add_argument("--decoy-sigma", type=float, default=0.1, help="T7: decoy AR(1) noise sigma")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="T9: link-strength definition passed to run_track")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
@@ -1456,7 +1464,8 @@ def main():
         "ensemble_size": int(args.ensemble_size),
         "flush_every": int(args.flush_every),
         "alpha_mix_grid": [float(x) for x in (args.alpha_grid or ALPHA_MIX_GRID)],
-        "extra_vars": dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving),
+        "extra_vars": dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving,
+                           decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta, decoy_sigma=args.decoy_sigma),
         "strength_mode": args.strength_mode,
         "search_space": args.search_space,
         "n_total_trials": len(all_jobs),
@@ -1526,7 +1535,9 @@ def main():
                 (args.alpha_grid or ALPHA_MIX_GRID),
                 args.ensemble_size,
                 args.seed,
-                dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving),
+                dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving,
+                     **({} if args.n_decoy == 0 else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
+                                                          decoy_sigma=args.decoy_sigma))),
                 args.strength_mode,
             )
             for job in pending_jobs
