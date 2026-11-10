@@ -6,6 +6,7 @@ Writes CACHE_DIR/<code>_<YYYYMMDD>.nc (pl: all requested levels kept separately)
 CACHE_DIR/cape_<YYYYMM>.nc. Spawn pool (fork + netCDF/HDF5 can deadlock).
 """
 import multiprocessing as mp
+import os
 import sys
 from pathlib import Path
 
@@ -46,7 +47,7 @@ def work(job):
         if levels is not None:
             da = da.sel(level=levels)
         da = subset(da).load()
-    tmp = out.with_suffix(".tmp")
+    tmp = out.with_suffix(f".{os.getpid()}.tmp")
     da.to_dataset().to_netcdf(tmp)
     tmp.rename(out)
     return str(out), "ok"
