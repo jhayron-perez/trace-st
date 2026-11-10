@@ -453,6 +453,14 @@ SEARCH_SPACE_GRANGER = dict(
 )
 
 
+def use_wide_search_space():
+    """Revision-1 T10 (opt-in): one step below/above the published W, box and r ranges,
+    lambda widened by 0.5 decade on each side. Mutates the module-level search spaces."""
+    SEARCH_SPACE_SHARED.update(timewindow=["4d", "5d", "6d", "7d", "8d"],
+                               box_size=[25, 30, 35, 40, 45], radius=[3, 4, 5, 6, 7])
+    SEARCH_SPACE_GRANGER["lambda_a"] = lambda rng: float(10 ** rng.uniform(-3.0, -0.5))
+
+
 def _draw_from_space(rng, x):
     if callable(x):
         return x(rng)
@@ -1407,6 +1415,8 @@ def parse_args():
     parser.add_argument("--n-moving", type=int, default=0, help="T7: extra independent moving-blob variables")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="T9: link-strength definition passed to run_track")
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
+                        help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
     return parser.parse_args()
 
 
@@ -1429,6 +1439,8 @@ def main():
     meta_path = outdir / "run_metadata.json"
     summary_path = outdir / "run_summary.json"
 
+    if args.search_space == "wide":
+        use_wide_search_space()
     all_jobs = build_multivar_jobs(n_trials=args.n_trials, seed=args.seed)
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
@@ -1446,6 +1458,7 @@ def main():
         "alpha_mix_grid": [float(x) for x in (args.alpha_grid or ALPHA_MIX_GRID)],
         "extra_vars": dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving),
         "strength_mode": args.strength_mode,
+        "search_space": args.search_space,
         "n_total_trials": len(all_jobs),
         "n_completed_trials_found_at_start": len(completed_ids),
         "n_pending_trials_at_start": len(pending_jobs),

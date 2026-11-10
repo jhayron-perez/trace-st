@@ -216,6 +216,14 @@ SEARCH_SPACE_EXTRA_PNW = dict(
 )
 
 
+def use_wide_search_space():
+    """Revision-1 T10 (opt-in): one step below/above the published W, box and r ranges,
+    lambda widened by 0.5 decade on each side."""
+    SEARCH_SPACE_SHARED_PNW.update(timewindow=["3d", "4d", "5d", "6d", "7d"],
+                                   box_size=[25.0, 30.0, 35.0, 40.0, 45.0], radius=[3, 4, 5, 6, 7, 8])
+    SEARCH_SPACE_GRANGER_PNW["lambda_a"] = lambda rng: float(10 ** rng.uniform(-3.0, 0.5))
+
+
 def _draw_from_space(rng: np.random.Generator, x):
     if callable(x):
         return x(rng)
@@ -994,6 +1002,8 @@ def parse_args():
     parser.add_argument("--placebo-vars", type=str, nargs="+", default=None,
                         help="Var stems to add as wrong-year placebos (e.g. z500 tcwv)")
     parser.add_argument("--placebo-year", type=int, default=2010, help="Source year of the placebos")
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
+                        help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
     parser.add_argument("--run-ids", type=int, nargs="+", default=None,
                         help="Run only these run ids (configs still drawn for all --n-trials)")
     parser.add_argument(
@@ -1017,6 +1027,8 @@ def main():
     print("Shape:", list(full_data_run.shape), flush=True)
 
     print("Sampling hyperparameters...", flush=True)
+    if args.search_space == "wide":
+        use_wide_search_space()
     jobs = build_pnw_jobs(n_trials=args.n_trials, seed=args.seed)
     param_samples = [trial for _, trial in jobs]
     if args.run_ids is not None:
