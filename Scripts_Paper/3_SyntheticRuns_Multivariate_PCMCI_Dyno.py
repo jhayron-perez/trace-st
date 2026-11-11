@@ -1171,8 +1171,23 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 # -----------------------------------------------------------------------------
 # Evaluate one method/configuration across all mixture strengths
 # -----------------------------------------------------------------------------
+_EN_MODULE = None
+
+
+def _en_module():
+    """Night-2 C3 (opt-in): the EN script's generator (identical base case + T7 extras + target driver)."""
+    global _EN_MODULE
+    if _EN_MODULE is None:
+        import importlib.util
+        p = Path(__file__).resolve().parent / "3_SyntheticRuns_Multivariate.py"
+        spec = importlib.util.spec_from_file_location("syn_multivariate_en", p)
+        _EN_MODULE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_EN_MODULE)
+    return _EN_MODULE
+
+
 def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED,
-                                      strength_mode="native"):
+                                      strength_mode="native", case_kwargs=None):
     params = build_params_from_trial_multivar(method, trial)
     if strength_mode != "native":
         params["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
@@ -1182,12 +1197,16 @@ def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_
     bundles = []
 
     for j, alpha_mix in enumerate(alpha_grid):
-        case = build_multivariate_case(
-            alpha_mix=float(alpha_mix),
-            T=40,
-            N_inject=8,
-            seed=GLOBAL_SEED,
-        )
+        if case_kwargs:
+            case = _en_module().build_multivariate_case(
+                alpha_mix=float(alpha_mix), T=40, N_inject=8, seed=GLOBAL_SEED, **case_kwargs)
+        else:
+            case = build_multivariate_case(
+                alpha_mix=float(alpha_mix),
+                T=40,
+                N_inject=8,
+                seed=GLOBAL_SEED,
+            )
 
         ensemble_out = run_ensemble(
             case,
@@ -1209,6 +1228,10 @@ def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_
             "estimated_alpha_end": row["end_frac_var1"],
             "estimated_alpha_density": row["density_frac_var1"],
         }
+        if case_kwargs:
+            row_alpha["night2_case_kwargs"] = json.dumps(case_kwargs, sort_keys=True)
+            if sum(int(case_kwargs.get(k, 0)) for k in ("n_noise", "n_decoy", "n_moving")) > 0:
+                row_alpha.update(_en_module().summarize_all_vars(case, ensemble_out, params))
         rows_alpha.append(row_alpha)
 
         dfm = summary["df_members"].copy()
@@ -1311,7 +1334,8 @@ def evaluate_trial_across_alphas_full(method, trial_id, trial, alpha_grid=ALPHA_
 # -----------------------------------------------------------------------------
 # Multiprocessing wrapper for one method/configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED, strength_mode="native"):
+def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED, strength_mode="native",
+                          case_kwargs=None):
     method, trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1324,6 +1348,7 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=20, seed=SEARCH_SEED
             M=M,
             seed=seed,
             strength_mode=strength_mode,
+            **({"case_kwargs": case_kwargs} if case_kwargs else {}),
         )
 
         trial_row = out["trial_row"]
@@ -1417,7 +1442,28 @@ def parse_args():
                              "methods first, so a subset gets the same configs as the full run.")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="revision-1 T9: link-strength definition passed to run_track")
+    # night-2 C3 opt-ins: use the EN script's generator with T7 extras / target driver (defaults: off)
+    parser.add_argument("--alpha-grid", type=float, nargs="+", default=None, help="alpha_mix values")
+    parser.add_argument("--n-noise", type=int, default=0)
+    parser.add_argument("--n-decoy", type=int, default=0)
+    parser.add_argument("--n-moving", type=int, default=0)
+    parser.add_argument("--decoy-phi", type=float, default=0.8)
+    parser.add_argument("--decoy-beta", type=float, default=0.8)
+    parser.add_argument("--decoy-sigma", type=float, default=0.1)
+    parser.add_argument("--target-driver", type=str, default="clean", choices=["clean", "observed"])
     return parser.parse_args()
+
+
+def night2_case_kwargs(args):
+    kw = {}
+    for k in ("n_noise", "n_decoy", "n_moving"):
+        if getattr(args, k):
+            kw[k] = int(getattr(args, k))
+    if args.n_decoy:
+        kw.update(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta, decoy_sigma=args.decoy_sigma)
+    if args.target_driver != "clean":
+        kw["target_driver"] = args.target_driver
+    return kw
 
 
 def main():
@@ -1462,7 +1508,8 @@ def main():
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),
         "flush_every": int(args.flush_every),
-        "alpha_mix_grid": [float(x) for x in ALPHA_MIX_GRID],
+        "alpha_mix_grid": [float(x) for x in (args.alpha_grid or ALPHA_MIX_GRID)],
+        **({"night2_case_kwargs": night2_case_kwargs(args)} if night2_case_kwargs(args) else {}),
         "n_total_jobs": len(all_jobs),
         "n_completed_jobs_found_at_start": len(completed_keys),
         "n_pending_jobs_at_start": len(pending_jobs),
@@ -1541,10 +1588,11 @@ def main():
             ex.submit(
                 evaluate_trial_worker,
                 job,
-                ALPHA_MIX_GRID,
+                (args.alpha_grid or ALPHA_MIX_GRID),
                 args.ensemble_size,
                 args.seed,
                 args.strength_mode,
+                night2_case_kwargs(args),
             )
             for job in pending_jobs
         ]

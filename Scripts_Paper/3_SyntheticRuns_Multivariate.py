@@ -127,7 +127,8 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
 
 
 def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
-                      sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1):
+                      sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1,
+                      moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0):
     """Revision-1 T7 non-causal variables (none of them enters B's equation).
 
     noise k  : independent smoothed AR(1) field, same construction as the A/C noise
@@ -140,6 +141,11 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
                is at t = t0 - 2, i.e. within ~20 units of the event during t0-5..t0;
                approach direction 45 deg + 360 k / n_moving; speed 2.5 units/day; plus A/C-type
                AR(1) noise, seed + 300 + k. Not coupled to B.
+               Night-2 opt-ins (defaults = above): moving_offset (closest-approach distance, 15),
+               moving_tc_lag (closest approach at t0 - lag, 2); moving_placement="random": each blob
+               gets a random straight track (direction U(0, 360), passing a point uniform in
+               [20, 180]^2 at a time uniform in [0, T-1], same speed), rng seed + 400 + k, not aimed
+               at the event.
     """
     out, info = [], []
     ey, ex = float(event[0]), float(event[1])
@@ -159,11 +165,18 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
         name = f"D{k + 1}_{'A' if k % 2 == 0 else 'C'}"
         out.append(build_dataarray(name, D, time_coord, ys, xs)); info.append((name, "decoy"))
     for k in range(int(n_moving)):
-        th = np.deg2rad(45.0 + 360.0 * k / max(int(n_moving), 1))
-        d = np.array([np.sin(th), np.cos(th)])          # (dy, dx) direction of motion
-        perp = np.array([-d[1], d[0]])
-        tc = float(t0 - 2)
-        q = np.array([ey, ex]) + 15.0 * perp
+        if moving_placement == "random":
+            rng_m = np.random.default_rng(seed + 400 + k)
+            th = float(rng_m.uniform(0.0, 2.0 * np.pi))
+            d = np.array([np.sin(th), np.cos(th)])
+            q = rng_m.uniform(20.0, 180.0, size=2)
+            tc = float(rng_m.uniform(0.0, T - 1))
+        else:
+            th = np.deg2rad(45.0 + 360.0 * k / max(int(n_moving), 1))
+            d = np.array([np.sin(th), np.cos(th)])          # (dy, dx) direction of motion
+            perp = np.array([-d[1], d[0]])
+            tc = float(t0 - float(moving_tc_lag))
+            q = np.array([ey, ex]) + float(moving_offset) * perp
         start = q - 2.5 * tc * d
         end = q + 2.5 * (T - 1 - tc) * d
         cen = bezier_centers(start, start + (end - start) / 3, start + 2 * (end - start) / 3, end, T)
@@ -262,9 +275,18 @@ def build_multivariate_case(
     decoy_phi=0.8,
     decoy_beta=0.8,
     decoy_sigma=0.1,
+    target_driver="clean",
+    parent_sigma=None,
+    moving_placement="event",
+    moving_offset=15.0,
+    moving_tc_lag=2.0,
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
-    (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars."""
+    (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars.
+    Night-2 opt-ins (defaults = original): target_driver="observed" drives B with the observed
+    (noisy, clipped) A and C instead of A_clean / C_clean; parent_sigma sets sigma_A = sigma_C."""
+    if parent_sigma is not None:
+        sigma_A = sigma_C = float(parent_sigma)
     time_coord = pd.date_range("2001-01-01", periods=T, freq="D")
 
     Y_MIN, Y_MAX = 0, 200
@@ -334,10 +356,16 @@ def build_multivariate_case(
     noise_B = make_spatiotemporal_ar1_noise((T, NY, NX), phi=phi_B, sigma=sigma_B, rng=rng_B)
     B = noise_B.copy()
 
+    if target_driver == "observed":
+        drv_A, drv_C = A, C
+    elif target_driver == "clean":
+        drv_A, drv_C = A_clean, C_clean
+    else:
+        raise ValueError(f"target_driver {target_driver!r}")
     for t in range(t0, T):
         B[t] = (
-            alpha_mix * A_clean[t - tau_mix]
-            + (1.0 - alpha_mix) * C_clean[t - tau_mix]
+            alpha_mix * drv_A[t - tau_mix]
+            + (1.0 - alpha_mix) * drv_C[t - tau_mix]
             + noise_B[t]
         )
     if clip_to_positive:
@@ -354,6 +382,7 @@ def build_multivariate_case(
             n_noise=n_noise, n_decoy=n_decoy, n_moving=n_moving,
             sig_y=sig_y, sig_x=sig_x, seed=seed, clip_to_positive=clip_to_positive,
             decoy_phi=decoy_phi, decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
+            moving_placement=moving_placement, moving_offset=moving_offset, moving_tc_lag=moving_tc_lag,
         )
 
     full_data_run = xr.concat([full_data_A, full_data_B, full_data_C] + extra_list, dim="var")
@@ -1425,7 +1454,43 @@ def parse_args():
                         help="T9: link-strength definition passed to run_track")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
                         help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
+    # night-2 opt-ins (C/D); defaults = original generator
+    parser.add_argument("--target-driver", type=str, default="clean", choices=["clean", "observed"],
+                        help="C1: B driven by A_clean/C_clean (default) or by the observed noisy A/C")
+    parser.add_argument("--parent-sigma", type=float, default=None, help="C2: sigma_A = sigma_C (default 0.10)")
+    parser.add_argument("--moving-placement", type=str, default="event", choices=["event", "random"],
+                        help="D2: moving blobs aimed at the event (default) or random straight tracks")
+    parser.add_argument("--moving-offset", type=float, default=15.0, help="D3(i): closest-approach distance")
+    parser.add_argument("--moving-tc-lag", type=float, default=2.0, help="D3(ii): closest approach at t0 - lag")
+    parser.add_argument("--timewindow-choices", type=str, nargs="+", default=None,
+                        help="D3(iii): override each trial's W with a seeded draw from these (e.g. 10d 11d 12d)")
     return parser.parse_args()
+
+
+def night2_case_kwargs(args):
+    """Non-default night-2 generator options only (so default runs pass exactly the old kwargs)."""
+    kw = {}
+    if args.target_driver != "clean":
+        kw["target_driver"] = args.target_driver
+    if args.parent_sigma is not None:
+        kw["parent_sigma"] = float(args.parent_sigma)
+    if args.moving_placement != "event":
+        kw["moving_placement"] = args.moving_placement
+    if args.moving_offset != 15.0:
+        kw["moving_offset"] = float(args.moving_offset)
+    if args.moving_tc_lag != 2.0:
+        kw["moving_tc_lag"] = float(args.moving_tc_lag)
+    return kw
+
+
+def override_timewindow(jobs, choices, seed):
+    """D3(iii): W per trial from a separate rng (seed + 7000 + trial_id); other params unchanged."""
+    out = []
+    for trial_id, trial in jobs:
+        t = dict(trial)
+        t["timewindow"] = str(np.random.default_rng(int(seed) + 7000 + int(trial_id)).choice(list(choices)))
+        out.append((trial_id, t))
+    return out
 
 
 def main():
@@ -1450,6 +1515,9 @@ def main():
     if args.search_space == "wide":
         use_wide_search_space()
     all_jobs = build_multivar_jobs(n_trials=args.n_trials, seed=args.seed)
+    if args.timewindow_choices:
+        all_jobs = override_timewindow(all_jobs, args.timewindow_choices, args.seed)
+    n2kw = night2_case_kwargs(args)
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
     pending_jobs = filter_pending_trials(all_jobs, completed_ids)
@@ -1468,6 +1536,8 @@ def main():
                            decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta, decoy_sigma=args.decoy_sigma),
         "strength_mode": args.strength_mode,
         "search_space": args.search_space,
+        **({"night2_case_kwargs": n2kw} if n2kw else {}),
+        **({"timewindow_choices": list(args.timewindow_choices)} if args.timewindow_choices else {}),
         "n_total_trials": len(all_jobs),
         "n_completed_trials_found_at_start": len(completed_ids),
         "n_pending_trials_at_start": len(pending_jobs),
@@ -1537,7 +1607,8 @@ def main():
                 args.seed,
                 dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving,
                      **({} if args.n_decoy == 0 else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
-                                                          decoy_sigma=args.decoy_sigma))),
+                                                          decoy_sigma=args.decoy_sigma)),
+                     **n2kw),
                 args.strength_mode,
             )
             for job in pending_jobs
