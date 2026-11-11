@@ -21,13 +21,13 @@ FIX = Path(__file__).parent / "data" / "grouping_default_adb4bb9.npz"
 
 
 def opposite_stencil(radius=2):
-    """Variable 1, positive links: 3 links to the east (strong) and 3 to the west (equal strength)."""
+    """Variable 1, positive links: two collinear links east (0.50, 0.46), two west (0.44, 0.42).
+
+    Same stencil as analysis_revision1/illustrate_grouping.py.
+    """
     s = 2 * radius + 1
-    def pos(di, dj):
-        return (di + radius) * s + (dj + radius)
-    east = [(0, 2), (-1, 2), (1, 2)]
-    west = [(0, -2), (-1, -2), (1, -2)]
-    rows = [("p1_c1", 0.50, (pos(*d), 0, 1)) for d in east] + [("p1_c1", 0.45, (pos(*d), 0, 1)) for d in west]
+    links = [((0, 1), 0.50), ((0, 2), 0.46), ((0, -1), 0.44), ((0, -2), 0.42)]
+    rows = [("p1_c1", c, ((di + radius) * s + dj + radius, 0, 1)) for (di, dj), c in links]
     df = pd.DataFrame(rows, columns=["vars", "causal_value", "position"])
     df["causal_value_abs"] = df["causal_value"].abs()
     return df
@@ -65,14 +65,13 @@ class TestGroupings(unittest.TestCase):
     def test_variable_sign_stalls_dbscan_moves(self):
         df = opposite_stencil()
         d_lat, d_lon, *_ = movement.pick_direction_then_weighted_delta(df, **KW)
-        self.assertAlmostEqual(d_lon, 2.0)  # dbscan: east cluster wins, full step east
+        self.assertGreater(d_lon, 1.4)      # dbscan: east cluster wins (weighted mean ~1.44 E)
         v_lat, v_lon, *_ = movement.pick_direction_then_weighted_delta(df, grouping="variable_sign", **KW)
-        self.assertLess(abs(v_lon), 0.5)    # merged mean ~ 0.25 (only the strength imbalance)
+        self.assertLess(abs(v_lon), 0.3)    # merged opposite links: ~0.23 E, i.e. stall
         self.assertAlmostEqual(v_lat, 0.0)
-        s_lat, s_lon, *_ = movement.pick_direction_then_weighted_delta(df, grouping="sectors8", **KW)
-        k_lat, k_lon, *_ = movement.pick_direction_then_weighted_delta(df, grouping="kmeans", **KW)
-        self.assertAlmostEqual(k_lon, 2.0)
-        self.assertGreater(s_lon, 1.9)      # E sector (exactly east link), or E sector incl. NE/SE
+        for g in ("sectors8", "kmeans"):
+            g_lat, g_lon, *_ = movement.pick_direction_then_weighted_delta(df, grouping=g, **KW)
+            self.assertAlmostEqual(g_lon, d_lon, msg=g)
 
     def test_sectors8_labels(self):
         ang = np.deg2rad([0, 22, 23, 45, 90, 180, -90, -23, 340])
