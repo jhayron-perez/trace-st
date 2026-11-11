@@ -120,7 +120,13 @@ def bezier_centers(start, control1, control2, end, T):
     return centers
 
 
-def build_synthetic_case():
+def build_synthetic_case(n_pre=0, pre_origin="hold"):
+    """Paper T1 record (40 daily steps, event at the last day).
+
+    revision-1 G (opt-in, n_pre > 0): prepend n_pre days *before* the true origin (centers[0])
+    so that n_steps_time > 37 is feasible; days 0..39 stay byte-identical to the paper record.
+    See extend_record_before_origin.
+    """
     T = 40
     time_coord = pd.date_range("2001-01-01", periods=T, freq="D")
 
@@ -232,11 +238,86 @@ def build_synthetic_case():
         name="synthetic",
     )
 
+    if int(n_pre) > 0:
+        A, B, time_coord, track_specs = extend_record_before_origin(
+            A, B, noise_A, time_coord, track_specs, int(n_pre), str(pre_origin),
+            y2d=y2d, x2d=x2d, sig_y=sig_y, sig_x=sig_x, amp=amp,
+            phi_A=phi_A, sigma_A=sigma_A, phi_B=phi_B, beta_AB=beta_AB, sigma_B=sigma_B,
+        )
+        full_data_A = xr.DataArray(A[:, None, :, :].astype(np.float32), dims=("time", "var", "y", "x"),
+                                   coords={"time": time_coord, "var": ["A"], "y": ys, "x": xs}, name="synthetic")
+        full_data_B = xr.DataArray(B[:, None, :, :].astype(np.float32), dims=("time", "var", "y", "x"),
+                                   coords={"time": time_coord, "var": ["B"], "y": ys, "x": xs}, name="synthetic")
+
     full_data_run = xr.concat([full_data_A, full_data_B], dim="var")
     full_data_run = full_data_run.rename({"y": "lat", "x": "lon"})
     date_end = str(time_coord[-1].date())
 
     return full_data_run, track_specs, date_end
+
+
+def extend_record_before_origin(A, B, noise_A, time_coord, track_specs, n_pre, pre_origin, *,
+                                y2d, x2d, sig_y, sig_x, amp, phi_A, sigma_A, phi_B, beta_AB, sigma_B):
+    """revision-1 G: prepend n_pre days before day 0 (the true origin of every track).
+
+    - Source: pre_origin="hold" -> each blob sits at its origin centers[0] (truth before the
+      origin = origin); "absent" -> no blob (noise only; truth still set to the origin).
+    - A noise: the same AR(1) continued *backwards* from noise_A[0] (a stationary Gaussian AR(1)
+      is time-reversible): n[-k] = phi_A n[-k+1] + smoothed eps, rng seed GLOBAL_SEED + 101.
+    - B: same recursion as the paper, run forward over the prepended days from a fresh noise
+      start (seed GLOBAL_SEED + 102): B[t] = phi_B B[t-1] + beta_AB A[t-1] + noise. Day 0 keeps
+      the paper value B[0] = noise_B[0] (as in the paper, B has a cold start at day 0), so days
+      0..39 of A and B are byte-identical to the paper record.
+    - Track truth: centers prepended with n_pre copies of centers[0]; event unchanged.
+    """
+    if pre_origin not in ("hold", "absent"):
+        raise ValueError("pre_origin must be 'hold' or 'absent'")
+    _, NY, NX = A.shape
+    A_clean_pre = np.zeros((n_pre, NY, NX), dtype=np.float32)
+    if pre_origin == "hold":
+        for spec in track_specs:
+            y0, x0 = spec["centers"][0]
+            blob = gaussian_blob(y2d, x2d, y0=y0, x0=x0, sig_y=sig_y, sig_x=sig_x,
+                                 amp=spec.get("amp", amp)).astype(np.float32)
+            A_clean_pre += blob[None]
+
+    rng_pre = np.random.default_rng(GLOBAL_SEED + 101)
+    noise_pre = np.zeros((n_pre, NY, NX), dtype=np.float32)
+    nxt = noise_A[0]
+    for k in range(n_pre - 1, -1, -1):  # fill day -1, -2, ... (index n_pre-1 is day -1)
+        eps = rng_pre.normal(0.0, sigma_A, size=(NY, NX)).astype(np.float32)
+        eps = gaussian_filter(eps, sigma=(1.5, 1.5), mode="nearest")
+        noise_pre[k] = phi_A * nxt + eps
+        nxt = noise_pre[k]
+    A_pre = np.clip(A_clean_pre + noise_pre, 0.0, None)
+
+    noise_B_pre = make_spatiotemporal_ar1_noise(A_pre.shape, phi=0.8, sigma=sigma_B,
+                                                rng=np.random.default_rng(GLOBAL_SEED + 102))
+    B_pre = np.zeros_like(A_pre, dtype=np.float32)
+    B_pre[0] = noise_B_pre[0]
+    for t in range(1, n_pre):
+        B_pre[t] = phi_B * B_pre[t - 1] + beta_AB * A_pre[t - 1] + noise_B_pre[t]
+    B_pre = np.clip(B_pre, 0.0, None)
+
+    time_pre = pd.date_range(end=time_coord[0] - pd.Timedelta(days=1), periods=n_pre, freq="D")
+    new_specs = []
+    for spec in track_specs:
+        sp = dict(spec)
+        c = np.asarray(spec["centers"], dtype=float)
+        sp["centers"] = np.vstack([np.repeat(c[:1], n_pre, axis=0), c])
+        new_specs.append(sp)
+    return (np.concatenate([A_pre, A], axis=0), np.concatenate([B_pre, B], axis=0),
+            time_pre.append(time_coord), new_specs)
+
+
+def n_pre_days_for(n_steps, record_length=None, max_window_days=4, paper_T=40):
+    """Days to prepend: explicit record_length - 40, else the minimum so every step of every
+    trial (timewindow up to 4 d) has a full window: max(0, n_steps + max_window - 1 - 40)."""
+    if record_length is not None:
+        if int(record_length) < paper_T:
+            raise ValueError("record_length must be >= 40")
+        return int(record_length) - paper_T
+    return max(0, int(n_steps) + int(max_window_days) - 1 - paper_T)
 
 
 # -----------------------------------------------------------------------------
@@ -624,12 +705,15 @@ def filter_pending_jobs(all_jobs, completed_keys):
 # -----------------------------------------------------------------------------
 # One independent hyperparameter evaluation
 # -----------------------------------------------------------------------------
-def evaluate_job(job, strength_mode="native", grouping="dbscan"):
+def evaluate_job(job, strength_mode="native", grouping="dbscan", n_steps=30, n_pre=0, pre_origin="hold"):
     method, trial_id, trial = job
     t0 = time.perf_counter()
 
     try:
-        full_data_run, track_specs, date_end = build_synthetic_case()
+        if int(n_pre) > 0:
+            full_data_run, track_specs, date_end = build_synthetic_case(n_pre=int(n_pre), pre_origin=pre_origin)
+        else:
+            full_data_run, track_specs, date_end = build_synthetic_case()
         params_elasticnet, params_pcmci, params_dynotears = build_base_params()
 
         if method == "granger":
@@ -656,7 +740,7 @@ def evaluate_job(job, strength_mode="native", grouping="dbscan"):
         ]:
             pbase[k] = trial[k]
 
-        pbase["n_steps_time"] = 30
+        pbase["n_steps_time"] = int(n_steps)  # 30 = paper; revision-1 G: --n-steps
         pbase["child_of_interest"] = 1
         pbase["montecarlo"] = False
         pbase["snap_to_grid"] = False
@@ -805,6 +889,13 @@ def parse_args():
                              "first, so a subset gets the same configs (trial ids) as the full run.")
     parser.add_argument("--n-configs", type=int, default=None,
                         help="Run only trial ids < N of each selected method (default: all)")
+    parser.add_argument("--n-steps", type=int, default=30,
+                        help="revision-1 G: n_steps_time (paper 30). >37 prepends days before the origin")
+    parser.add_argument("--record-length", type=int, default=None,
+                        help="revision-1 G: total record length in days (>= 40; default: 40 or the "
+                             "minimum n_steps + 3 so every step has a full window)")
+    parser.add_argument("--pre-origin", type=str, default="hold", choices=["hold", "absent"],
+                        help="revision-1 G: source before the origin: hold at the origin or absent")
     parser.add_argument("--trial-ids", type=str, default=None,
                         help="Run only these trial ids: comma list '0,5,7' or '@FILE' (one id per line)")
     return parser.parse_args()
@@ -847,6 +938,7 @@ def main():
 
     all_jobs = build_jobs(n_per_method=args.trials_per_method, seed=args.seed)
     trial_ids = parse_trial_ids(args.trial_ids)
+    n_pre = n_pre_days_for(args.n_steps, args.record_length)
     if args.methods is not None or args.n_configs is not None or trial_ids is not None:
         all_jobs = select_jobs(all_jobs, args.methods, args.n_configs, trial_ids)
 
@@ -869,6 +961,8 @@ def main():
         **({} if args.methods is None else {"methods_run": args.methods}),
         **({} if args.n_configs is None else {"n_configs": args.n_configs}),
         **({} if trial_ids is None else {"trial_ids": trial_ids}),
+        **({} if (args.n_steps == 30 and n_pre == 0) else
+           {"n_steps": args.n_steps, "n_pre_days": n_pre, "record_length": 40 + n_pre, "pre_origin": args.pre_origin}),
         "updated_at": pd.Timestamp.utcnow().isoformat(),
     }
     atomic_write_json(meta_path, meta)
@@ -923,7 +1017,8 @@ def main():
     ctx = mp.get_context("spawn")
 
     with ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx) as ex:
-        futures = [ex.submit(evaluate_job, job, args.strength_mode, args.grouping) for job in pending_jobs]
+        futures = [ex.submit(evaluate_job, job, args.strength_mode, args.grouping, args.n_steps, n_pre, args.pre_origin)
+                   for job in pending_jobs]
 
         for fut in as_completed(futures):
             result = fut.result()
