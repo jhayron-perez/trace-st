@@ -46,7 +46,7 @@ if [[ "${DRYRUN:-0}" == "1" ]]; then
   head -2 "$IDS" > "${OUTDIR}/trial_ids_dry.txt"; IDS="${OUTDIR}/trial_ids_dry.txt"
   ARGS=(--trials-per-method 1000 --methods granger --trial-ids "@${IDS}" --n-steps 40 --n-workers 2 --flush-every 1)
 else
-  ARGS=(--trials-per-method 1000 --methods granger --trial-ids "@${IDS}" --n-steps 40 --n-workers 120 --flush-every 25)
+  ARGS=(--trials-per-method 1000 --methods granger --trial-ids "@${IDS}" --n-steps "${NSTEPS:-40}" --n-workers 120 --flush-every 25)
 fi
 cd "$REPO/Scripts_Paper" || exit 2
 LOGDIR="${OUTDIR}/logs"
