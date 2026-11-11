@@ -13,7 +13,7 @@ variable X and on its twin (same run, so both compete in the same system).
 - Windows: PNW 1-10 / 11-20 / 21-30 d (Fig 6B); Debby 1-4 / 5-15 d; Pinatubo 1-3 / 4-16 d.
 
 python A4_twins.py SETNAME [--nproc N]
-  SETNAME in: pnw_8131602, pnw_A1, debby_A2, pinatubo_A3
+  SETNAME in: pnw_8131602, pnw_A1, debby_A2, debby_T8, pinatubo_A3
 Outputs: revision1/analysis_v2/A4_twins/<SETNAME>_{long.csv.gz,lead_summary.csv,window_summary.csv,horizon.csv}
 Figures: revision1/figures_v2/A4_twins/<SETNAME>_*.png/pdf
 Run through PBS only (reads the ensemble pickles / bundles).
@@ -39,7 +39,7 @@ PNW_STEM = dict(z500="Z500", z10="Z10", olr="MTNLWRF", tcwv="TCWV", slhf="MSLHF"
 A1_YEARS = [2006, 2011, 2012, 2018, 2020]
 A2_YEARS = [2003, 2004, 2005, 2007, 2008]
 NICE = dict(pnw_8131602="PNW 2021, Z500 and TCWV twins (2010)", pnw_A1="PNW 2021, one twin per variable (5 years)",
-            debby_A2="Debby, vorticity twin (5 years)", pinatubo_A3="Pinatubo, tag-03 twins")
+            debby_A2="Debby, vorticity twin (5 years)", debby_T8="Debby + CAPE, DIV200, vo twin 2005 (T8)", pinatubo_A3="Pinatubo, tag-03 twins")
 WINDOWS = dict(pnw=[(1, 10), (11, 20), (21, 30)], debby=[(1, 4), (5, 15)], pinatubo=[(1, 3), (4, 16)])
 
 
@@ -94,6 +94,9 @@ def set_defs(name):
         for y in A2_YEARS:
             runs.append(dict(dir=R1 / "A2_debby_twin" / f"vo_{y}", vars=["Tb", "vo", "precip", f"VO_P{y}"],
                              pairs=[("vo", f"VO_P{y}")], year=y, kind="debby"))
+    elif name == "debby_T8":   # night-1 T8 Debby: original vo + CAPE, DIV200 and the 2005 vo twin; original-vo retention
+        runs.append(dict(dir=R1 / "T8_debby", vars=["Tb", "vo", "precip", "CAPE", "DIV200", "VO_P2005"],
+                         pairs=[("vo", "VO_P2005")], year=2005, kind="debby", ids_from="T4r_debby"))
     elif name == "pinatubo_A3":
         P4 = C.VARS["pinatubo"]
         runs.append(dict(dir=R1 / "A3_pinatubo_twin" / "so2twin_TMSO203", vars=P4 + ["TMSO203"],
@@ -109,7 +112,10 @@ def set_defs(name):
     return runs
 
 
-def retained_ids(kind):
+def retained_ids(kind, ids_from=None):
+    if ids_from is not None:   # Debby retention computed on another baseline run
+        j = pd.read_csv(R1 / ids_from / "results_jobs_final.csv")
+        return sorted(j.loc[retention.debby_retained(j), "trial_id"].astype(int))
     if kind == "pnw":
         return [int(x) for x in open(R1 / "T6r_pnw" / "retained_run_ids.txt").read().split()]
     if kind == "debby":   # primary = rebuilt-vorticity baseline (PI decision 1c)
@@ -156,7 +162,7 @@ def main():
 
     runs = set_defs(a.set)
     kind = runs[0]["kind"]
-    ids = retained_ids(kind)
+    ids = retained_ids(kind, runs[0].get("ids_from"))
     out = C.outdir("A4_twins")
     rows, avail = [], []
     for r in runs:
