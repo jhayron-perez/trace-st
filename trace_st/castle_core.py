@@ -2830,6 +2830,7 @@ def _lasso_single_child_lag1(
     standardize: bool = True,
     refit_ridge: bool = True,
     ridge_alpha: float = 1e-2,
+    row_subset: np.ndarray | None = None,   # night-2 D4 (opt-in): fit on these (t-1 -> t) pair rows only
 ):
     """
     Fit sparse lag-1 parents for ONE child node using Lasso/ElasticNet,
@@ -2865,6 +2866,9 @@ def _lasso_single_child_lag1(
     X = Xall[src, :]                        # predictors at t-1, shape ((R*(T-1)), N)
     y = Xall[dst, child_node]               # child at t, shape ((R*(T-1)),)
     ### CHATGPT WAY ###
+    if row_subset is not None:
+        X = X[row_subset]
+        y = y[row_subset]
     
     # print(X.shape)
     # print(y.shape)
@@ -2952,7 +2956,13 @@ def mv_CaStLe_GRANGER(
     dependence_threshold: float = 1e-4,
     strength_threshold: Optional[float] = None,
     fit_intercept: bool = True,          # ← ADD THIS
+    stability: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
+    """stability (night-2 D4, opt-in; default None = unchanged): dict(n_sub=20, frac=0.5, thr=0.6, seed=0).
+    Refit the same sparse model on n_sub random subsamples (fraction frac, without replacement) of the
+    (t-1 -> t) stencil sample pairs and keep only parents selected in >= thr of them (Meinshausen &
+    Buhlmann 2010). Kept links keep their full-data coefficients. Subsamples use their own rng
+    (seed), never the trajectory-selection rng."""
 
     assert data.ndim == 4, "data must have 4 dimensions (variable_n, Y, X, T)"
     assert min_tau in (1,), "This GRANGER wrapper currently supports min_tau=1 only."
@@ -3007,6 +3017,26 @@ def mv_CaStLe_GRANGER(
             refit_ridge=bool(refit_ridge),
             ridge_alpha=float(ridge_alpha),
         )
+        if stability is not None:
+            n_sub = int(stability.get("n_sub", 20)); frac = float(stability.get("frac", 0.5))
+            thr = float(stability.get("thr", 0.6))
+            n_pairs = (reduced_space.shape[0] // T) * (T - 1)
+            rng_s = np.random.default_rng(int(stability.get("seed", 0)))
+            k = max(int(round(frac * n_pairs)), 2)
+            freq = np.zeros(node_count, dtype=float)
+            for _ in range(n_sub):
+                sub = np.sort(rng_s.choice(n_pairs, size=k, replace=False))
+                gs, _vs = _lasso_single_child_lag1(
+                    reduced_space, node_count=node_count, child_node=int(child_node), T=T,
+                    lambda_a=float(lambda_a), l1_ratio=float(l1_ratio) if l1_ratio is not None else None,
+                    dependence_threshold=float(dependence_threshold), fit_intercept=bool(fit_intercept),
+                    max_iter=int(max_iter), standardize=bool(standardize), refit_ridge=bool(refit_ridge),
+                    ridge_alpha=float(ridge_alpha), row_subset=sub)
+                freq += (gs[:, child_node, 1] == "-->")
+            drop = (freq / max(n_sub, 1)) < thr
+            g1 = g1.copy(); v1 = v1.copy()
+            g1[drop, child_node, 1] = ""
+            v1[drop, child_node, 1] = 0.0
         # merge into full matrices
         graph[:, child_node, 1] = g1[:, child_node, 1]
         val[:, child_node, 1]   = v1[:, child_node, 1]

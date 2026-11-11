@@ -58,6 +58,8 @@ SEARCH_SEED = 11
 # Prescribed causal-mixture strengths evaluated in the manuscript
 # -----------------------------------------------------------------------------
 ALPHA_MIX_GRID = [0.2, 0.4, 0.6, 0.8]
+# night-2 D4 (opt-in): stability-selection settings; read from the environment so spawned workers see it
+STABILITY = json.loads(os.environ["TST_STABILITY"]) if os.environ.get("TST_STABILITY") else None
 
 # -----------------------------------------------------------------------------
 # Controlled fields, prescribed paths, and lagged response construction
@@ -1209,10 +1211,14 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 # Evaluate one configuration across all prescribed mixture strengths
 # -----------------------------------------------------------------------------
 def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
-                                      extra_vars=None, strength_mode="native"):
+                                      extra_vars=None, strength_mode="native", grouping="dbscan"):
     params = build_params_from_trial_multivar(trial)
     if strength_mode != "native":
         params["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
+    if grouping != "dbscan":
+        params["grouping"] = str(grouping)  # revision-1 opt-in (E, R1 major 2)
+    if STABILITY is not None:  # night-2 D4 opt-in (set from --stability-selection in main / worker)
+        params["cd_kwargs"]["stability"] = dict(STABILITY)
     extra_vars = dict(extra_vars or {})
 
     rows_alpha = []
@@ -1251,6 +1257,8 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             row_alpha.update(summarize_all_vars(case, ensemble_out, params))
         if strength_mode != "native":
             row_alpha["strength_mode"] = str(strength_mode)
+        if grouping != "dbscan":
+            row_alpha["grouping"] = str(grouping)
         rows_alpha.append(row_alpha)
 
         dfm = summary["df_members"].copy()
@@ -1343,7 +1351,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
 # Multiprocessing wrapper for one hyperparameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
-                          extra_vars=None, strength_mode="native"):
+                          extra_vars=None, strength_mode="native", grouping="dbscan"):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1356,6 +1364,7 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED
             seed=seed,
             extra_vars=extra_vars,
             strength_mode=strength_mode,
+            grouping=grouping,
         )
 
         trial_row = out["trial_row"]
@@ -1464,6 +1473,11 @@ def parse_args():
     parser.add_argument("--moving-tc-lag", type=float, default=2.0, help="D3(ii): closest approach at t0 - lag")
     parser.add_argument("--timewindow-choices", type=str, nargs="+", default=None,
                         help="D3(iii): override each trial's W with a seeded draw from these (e.g. 10d 11d 12d)")
+    parser.add_argument("--stability-selection", action="store_true",
+                        help="D4: Elastic-Net stability selection, n_sub 20, frac 0.5, thr 0.6 (Meinshausen & Buhlmann 2010)")
+    parser.add_argument("--grouping", type=str, default="dbscan",
+                        choices=["dbscan", "strongest", "variable_sign", "sectors8", "kmeans"],
+                        help="revision-1 E: winner grouping passed to run_track (default dbscan = original)")
     return parser.parse_args()
 
 
@@ -1517,6 +1531,10 @@ def main():
     all_jobs = build_multivar_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.timewindow_choices:
         all_jobs = override_timewindow(all_jobs, args.timewindow_choices, args.seed)
+    global STABILITY
+    if args.stability_selection:
+        STABILITY = dict(n_sub=20, frac=0.5, thr=0.6, seed=0)
+        os.environ["TST_STABILITY"] = json.dumps(STABILITY)
     n2kw = night2_case_kwargs(args)
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
@@ -1538,6 +1556,8 @@ def main():
         "search_space": args.search_space,
         **({"night2_case_kwargs": n2kw} if n2kw else {}),
         **({"timewindow_choices": list(args.timewindow_choices)} if args.timewindow_choices else {}),
+        **({} if args.grouping == "dbscan" else {"grouping": args.grouping}),
+        **({"stability": STABILITY} if STABILITY else {}),
         "n_total_trials": len(all_jobs),
         "n_completed_trials_found_at_start": len(completed_ids),
         "n_pending_trials_at_start": len(pending_jobs),
@@ -1610,6 +1630,7 @@ def main():
                                                           decoy_sigma=args.decoy_sigma)),
                      **n2kw),
                 args.strength_mode,
+                args.grouping,
             )
             for job in pending_jobs
         ]

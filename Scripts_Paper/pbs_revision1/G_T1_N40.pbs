@@ -1,0 +1,65 @@
+#!/bin/bash
+#PBS -N tst_G_T1_N40
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -M jhayron@uchicago.edu
+#PBS -m abe
+#PBS -l walltime=04:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+# Revision-1 G (R2 l215): T1 Elastic-Net with n_steps_time = 40 on the 993 retained EN configs of
+# T1r_univariate (trace_st.retention.t1_retained, method granger; ids written to OUTDIR/trial_ids.txt).
+# The record gets 3 days prepended before the true origin (source held at the origin, see
+# build_synthetic_case / extend_record_before_origin); days 0..39 are the paper record. Deterministic.
+# Analysis note: retention for N = 40 is t1_retained(..., full_len=41).
+# qsub -v REPO=<checkout>[,DRYRUN=1] G_T1_N40.pbs   (DRYRUN=1: first 2 ids into revision1/dryrun/)
+set -uo pipefail
+: "${REPO:?set REPO}"
+module load conda
+conda activate castle
+
+R1="/glade/derecho/scratch/jhayron/DataCaStLeBTs/revision1"
+SCRIPT="1_SyntheticRuns_Univariate.py"
+T1R="${T1R:-$R1/T1r_univariate}"
+if [[ "${DRYRUN:-0}" == "1" ]]; then
+  OUTDIR="$R1/dryrun/${OUTNAME:-G_T1_N40}"
+else
+  OUTDIR="$R1/${OUTNAME:-G_T1_N40}"
+fi
+mkdir -p "${OUTDIR}"
+IDS="${OUTDIR}/trial_ids.txt"
+python - "$REPO" "$T1R/results_tracks_final.csv" "$IDS" <<'PY' || exit 3
+import sys; sys.path.insert(0, sys.argv[1])
+import pandas as pd
+from trace_st.retention import t1_retained
+d = pd.read_csv(sys.argv[2], usecols=["method", "trial_id", "track_idx", "raw_len"])
+r = t1_retained(d)
+ids = sorted(int(i) for (m, i), keep in r.items() if keep and m == "granger")
+open(sys.argv[3], "w").write("\n".join(map(str, ids)) + "\n")
+print(f"retained granger ids: {len(ids)} -> {sys.argv[3]}")
+PY
+N_IDS=$(wc -l < "$IDS")
+if [[ "${DRYRUN:-0}" != "1" && "$N_IDS" != "993" ]]; then echo "expected 993 retained ids, got $N_IDS"; exit 4; fi
+if [[ "${DRYRUN:-0}" == "1" ]]; then
+  head -2 "$IDS" > "${OUTDIR}/trial_ids_dry.txt"; IDS="${OUTDIR}/trial_ids_dry.txt"
+  ARGS=(--trials-per-method 1000 --methods granger --trial-ids "@${IDS}" --n-steps 40 --n-workers 2 --flush-every 1)
+else
+  ARGS=(--trials-per-method 1000 --methods granger --trial-ids "@${IDS}" --n-steps 40 --n-workers 120 --flush-every 25)
+fi
+cd "$REPO/Scripts_Paper" || exit 2
+LOGDIR="${OUTDIR}/logs"
+mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"
+mkdir -p "${TMPDIR}"
+
+echo "========== JOB INFO =========="
+echo "date: $(date)"; echo "jobid: ${PBS_JOBID}"; echo "host: $(hostname)"
+echo "repo: ${REPO} @ $(git -C "$REPO" describe --tags --always) $(git -C "$REPO" rev-parse HEAD)"
+echo "outdir: ${OUTDIR}"; echo "args: ${ARGS[*]} ${EXTRA_ARGS:-}"
+echo "=============================="
+
+python -u "${SCRIPT}" --outdir "${OUTDIR}" "${ARGS[@]}" ${EXTRA_ARGS:-} 2>&1 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+echo "python exit: ${PIPESTATUS[0]}"
+echo "Finished at: $(date)"

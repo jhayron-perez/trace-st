@@ -74,6 +74,59 @@ def _dbscan_on_uv(df_sub: pd.DataFrame, eps: float, min_samples: int) -> np.ndar
     return DBSCAN(eps=float(eps), min_samples=int(min_samples)).fit_predict(X)
 
 
+# -------------------------
+# Alternative groupings (revision-1, R1 major 2). Default "dbscan" never calls these.
+# -------------------------
+GROUPINGS = ("dbscan", "strongest", "variable_sign", "sectors8", "kmeans")
+
+
+def _sectors8_labels(df_dir: pd.DataFrame) -> np.ndarray:
+    """Fixed 45-degree direction sectors centred on E, NE, N, ... (label 0..7)."""
+    ang = np.arctan2(df_dir["v"].to_numpy(dtype=float), df_dir["u"].to_numpy(dtype=float))
+    return (np.floor((ang + np.pi / 8.0) / (np.pi / 4.0)).astype(int) % 8).astype(int)
+
+
+def _kmeans_labels(df_dir: pd.DataFrame, *, seed: int, k_max: int = 6) -> np.ndarray:
+    """k-means on unit (u,v); k in 2..min(k_max, n_unique, n-1) chosen by max silhouette.
+
+    n_unique <= 1 -> one cluster; n < 3 with 2 distinct directions -> one cluster per direction.
+    Deterministic: KMeans(random_state=seed, n_init=10); ties in silhouette -> smallest k.
+    """
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import silhouette_score
+
+    X = df_dir[["u", "v"]].to_numpy(dtype=float)
+    n = len(X)
+    uniq, inv = np.unique(np.round(X, 12), axis=0, return_inverse=True)
+    n_unique = len(uniq)
+    if n_unique <= 1:
+        return np.zeros(n, dtype=int)
+    k_hi = min(int(k_max), n_unique, n - 1)
+    if k_hi < 2:
+        return np.asarray(inv, dtype=int).ravel()
+    best_lab, best_score = None, -np.inf
+    for k in range(2, k_hi + 1):
+        lab = KMeans(n_clusters=k, n_init=10, random_state=int(seed)).fit_predict(X)
+        if len(np.unique(lab)) < 2:
+            continue
+        sc = float(silhouette_score(X, lab))
+        if sc > best_score + 1e-12:
+            best_lab, best_score = lab, sc
+    if best_lab is None:
+        return np.zeros(n, dtype=int)
+    return np.asarray(best_lab, dtype=int)
+
+
+def _group_labels(df_dir: pd.DataFrame, grouping: str, *, eps: float, min_samples: int, seed: int) -> np.ndarray:
+    if grouping == "dbscan":
+        return _dbscan_on_uv(df_dir, eps=float(eps), min_samples=int(min_samples))
+    if grouping == "sectors8":
+        return _sectors8_labels(df_dir)
+    if grouping == "kmeans":
+        return _kmeans_labels(df_dir, seed=seed)
+    raise ValueError(f"_group_labels: unsupported grouping {grouping!r}")
+
+
 def _split_noise_into_singletons(df: pd.DataFrame, cluster_col: str = "cluster") -> pd.DataFrame:
     """Turn DBSCAN noise points (-1) into singleton clusters so they can compete."""
     df = df.copy()
@@ -200,6 +253,8 @@ def pick_direction_then_weighted_delta(
     prob_rule: str = "linear",          # "softmax" or "linear"
     rng: np.random.Generator | None = None,
     winner_summary: str = "mean",       # <-- NEW: "mean" or "median"
+    grouping: str = "dbscan",           # revision-1: "dbscan" | "variable_sign" | "sectors8" | "kmeans"
+    kmeans_seed: int = 0,
 ):
     """
     Pick a direction cluster among candidate stencil links, then return the
@@ -208,7 +263,18 @@ def pick_direction_then_weighted_delta(
     winner_summary:
       - "mean": weighted mean using |causal_value|^alpha
       - "median": unweighted median across members (as in your patch)
+
+    grouping (revision-1, opt-in; groups are always formed within (parent, sign) as before):
+      - "dbscan" (default): DBSCAN on unit (u,v), noise -> singletons (original code path).
+      - "variable_sign": one group per (parent, sign); all directions and the centre node merged.
+      - "sectors8": fixed 45-degree direction sectors; centre-node links -> singletons.
+      - "kmeans": k-means on (u,v), k <= 6 by silhouette, random_state=kmeans_seed;
+        centre-node links -> singletons.
+      ("strongest" is handled in run_track: single strongest link, as averaging_winners=False.)
     """
+    grouping = str(grouping)
+    if grouping not in ("dbscan", "variable_sign", "sectors8", "kmeans"):
+        raise ValueError(f"grouping must be one of dbscan/variable_sign/sectors8/kmeans here, got {grouping!r}")
     df = list_candidates.copy()
     if len(df) == 0:
         return 0.0, 0.0, None, None, df
@@ -280,7 +346,14 @@ def pick_direction_then_weighted_delta(
             & np.isfinite(df_use.loc[idx, "v"])
         )
 
-        if mask_dir.sum() > 0:
+        if grouping == "variable_sign":
+            df_use.loc[idx, "cluster"] = 0
+        elif grouping != "dbscan":
+            if mask_dir.sum() > 0:
+                labels = _group_labels(df_use.loc[idx][mask_dir], grouping, eps=float(eps),
+                                       min_samples=int(min_samples), seed=int(kmeans_seed))
+                df_use.loc[df_use.loc[idx][mask_dir].index, "cluster"] = labels.astype(int)
+        elif mask_dir.sum() > 0:
             labels = _dbscan_on_uv(
                 df_use.loc[idx][mask_dir],
                 eps=float(eps),
