@@ -71,7 +71,10 @@ def densities_pnw(d, n_vars, ids, nproc):
 
 
 def densities_bundles(d, n_vars, ids, nproc, hourly):
-    j = pd.read_csv(d / "results_jobs_final.csv")
+    f = d / "results_jobs_final.csv"
+    if not f.exists():   # run still in progress: use the snapshot (completed trials only)
+        f = d / "results_jobs_snapshot.csv"
+    j = pd.read_csv(f)
     j = j[j["trial_id"].isin(ids) & j["bundle_npz"].notna()]
     with Pool(nproc) as pool:
         out = pool.map(_bundle_one, [(r.bundle_npz, r.box_size, n_vars, hourly) for r in j.itertuples()])
