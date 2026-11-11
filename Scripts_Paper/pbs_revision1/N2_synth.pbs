@@ -1,0 +1,32 @@
+#!/bin/bash
+#PBS -N tst_N2_synth
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -M jhayron@uchicago.edu
+#PBS -m abe
+#PBS -l walltime=08:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+# Night-2 C/D synthetic runs. Required -v: REPO, OUTNAME (under revision1/), ARGS_STR (full argument string).
+# Optional ENGINE=pcmci -> 3_SyntheticRuns_Multivariate_PCMCI_Dyno.py (default EN script).
+set -uo pipefail
+module load conda
+conda activate castle
+: "${REPO:?set REPO}"; : "${OUTNAME:?set OUTNAME}"; : "${ARGS_STR:?set ARGS_STR}"
+R1="/glade/derecho/scratch/jhayron/DataCaStLeBTs/revision1"
+if [[ "${ENGINE:-en}" == "pcmci" ]]; then SCRIPT="3_SyntheticRuns_Multivariate_PCMCI_Dyno.py"; else SCRIPT="3_SyntheticRuns_Multivariate.py"; fi
+OUTDIR="$R1/${OUTNAME}"
+cd "$REPO/Scripts_Paper" || exit 2
+LOGDIR="${OUTDIR}/logs"; mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"; mkdir -p "${TMPDIR}"
+read -r -a ARGS <<< "${ARGS_STR}"
+echo "========== JOB INFO =========="
+echo "date: $(date)"; echo "jobid: ${PBS_JOBID}"; echo "host: $(hostname)"
+echo "repo: ${REPO} @ $(git -C "$REPO" describe --tags --always) $(git -C "$REPO" rev-parse HEAD)"
+echo "script: ${SCRIPT}"; echo "outdir: ${OUTDIR}"; echo "args: ${ARGS[*]}"
+echo "=============================="
+python -u "${SCRIPT}" --outdir "${OUTDIR}" "${ARGS[@]}" 2>&1 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+echo "python exit: ${PIPESTATUS[0]}"
+echo "Finished at: $(date)"

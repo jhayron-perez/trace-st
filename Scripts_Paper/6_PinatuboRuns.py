@@ -56,6 +56,9 @@ SEARCH_SEED = 11
 # -----------------------------------------------------------------------------
 PATH_FILES_PINATUBO = "/glade/derecho/scratch/jhayron/DataCaStLeBTs/Sandia"
 PINATUBO_VAR_NAMES = ["TMSO201", "BURDENSO401", "TMH2SO401", "AEROD_v"]
+# night-2 A3 (opt-in): extra E3SMv2-SPA fields (tag-03 twins, FLUT) appended after the 4 paper variables,
+# same 1991 file layout, from this directory. Set by --extra-vars (via env so spawned workers see it).
+PATH_FILES_E3SM_EXTRA = "/glade/derecho/scratch/jhayron/DataCaStLeBTs/E3SM_SPA_full"
 
 EVENT_LAT_PINATUBO = 15.0
 EVENT_LON_PINATUBO = -160.0
@@ -155,11 +158,17 @@ def load_pinatubo_data(
     var_names=PINATUBO_VAR_NAMES,
     dlat=RES_PINATUBO,
     dlon=RES_PINATUBO,
+    extra_vars=None,
 ):
     vars_list = []
     for var in var_names:
         da = xr.open_dataset(f"{path_files_pinatubo}/{var}_199101_199112.nc")[var]
         vars_list.append(da)
+    if extra_vars:
+        for var in extra_vars:
+            da = xr.open_dataset(f"{PATH_FILES_E3SM_EXTRA}/{var}_199101_199112.nc")[var]
+            vars_list.append(da)
+        var_names = list(var_names) + list(extra_vars)
 
     full_data = xr.concat(vars_list, dim="var").transpose("var", "lat", "lon", "time")
     full_data = full_data.assign_coords(var=var_names)
@@ -184,8 +193,13 @@ def load_pinatubo_data(
     return full_data
 
 
+def _extra_vars_from_env():
+    v = os.environ.get("TST_PINATUBO_EXTRA", "")
+    return [x for x in v.split(",") if x] or None
+
+
 def build_case_pinatubo():
-    full_data = load_pinatubo_data()
+    full_data = load_pinatubo_data(extra_vars=_extra_vars_from_env())
 
     params_base = dict(
         timeres="1d",
@@ -514,7 +528,7 @@ def summarize_ensemble_pinatubo(
     box_size = float(params["box_size"])
     dt_days = get_timeres_days(params["timeres"])
 
-    parent_ids = [1, 2, 3, 4]
+    parent_ids = list(range(1, len(case["var_names"]) + 1))  # [1, 2, 3, 4] for the paper case
     density_by_parent = {p: np.zeros(shape2d, dtype=float) for p in parent_ids}
     density_steps_by_parent = {p: [] for p in parent_ids}
 
@@ -828,6 +842,11 @@ def summarize_trial_pinatubo(case, trial_id, params, summary):
         "density_range_dominant_parent": summary["density_range_dominant_parent"],
         "density_range_dominant_var": summary["density_range_dominant_var"],
     }
+    for p in range(5, len(case["var_names"]) + 1):  # night-2 A3 extras only (absent in the paper case)
+        nm = case["var_names"][p - 1]
+        row[f"pct_traj_ended_on_{nm}"] = summary["end_parent_frac"].get(p, np.nan)
+        for key in ("density_full", "density_full_frac", "density_range", "density_range_frac"):
+            row[f"{key}::{nm}"] = summary[key][p]
     return row
 
 # -----------------------------------------------------------------------------
@@ -1169,6 +1188,8 @@ def parse_args():
     parser.add_argument("--ensemble-size", type=int, default=30, help="Ensemble members per trial")
     parser.add_argument("--seed", type=int, default=SEARCH_SEED, help="Search seed")
     parser.add_argument("--flush-every", type=int, default=10, help="Write snapshot every N completed trials")
+    parser.add_argument("--extra-vars", type=str, nargs="+", default=None,
+                        help="night-2 A3: extra E3SM fields appended after the paper variables (e.g. TMSO203 BURDENSO403 FLUT)")
     return parser.parse_args()
 
 
@@ -1190,6 +1211,8 @@ def main():
     meta_path = outdir / "run_metadata.json"
     summary_path = outdir / "run_summary.json"
 
+    if args.extra_vars:
+        os.environ["TST_PINATUBO_EXTRA"] = ",".join(args.extra_vars)
     all_jobs = build_pinatubo_jobs(n_trials=args.n_trials, seed=args.seed)
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
@@ -1200,6 +1223,7 @@ def main():
     meta = {
         "case_name": "pinatubo",
         "seed": int(args.seed),
+        **({"extra_vars": list(args.extra_vars)} if args.extra_vars else {}),
         "n_trials": int(args.n_trials),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),

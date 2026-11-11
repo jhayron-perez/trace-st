@@ -1,0 +1,48 @@
+#!/bin/bash
+#PBS -N tst_A2_debby_twin
+#PBS -A UMCP0021
+#PBS -q main
+#PBS -j oe
+#PBS -k eod
+#PBS -M jhayron@uchicago.edu
+#PBS -m abe
+#PBS -l walltime=06:00:00
+#PBS -l select=1:ncpus=128:mpiprocs=128:mem=235GB
+#PBS -l job_priority=premium
+# Night-2 A2: Debby one-at-a-time vorticity twin (rebuilt recipe). Required -v: REPO, PYEAR.
+# Configs: union of retained trials of the rebuilt-vorticity baseline (T4r_debby_vorebuilt, 75) and the
+# original baseline (T4r_debby, 82), computed on the compute node with trace_st.retention.debby_retained.
+set -uo pipefail
+module load conda
+conda activate castle
+: "${REPO:?set REPO}"; : "${PYEAR:?set PYEAR}"
+R1="/glade/derecho/scratch/jhayron/DataCaStLeBTs/revision1"
+IN="$R1/inputs_debby"
+OUTDIR="$R1/A2_debby_twin/vo_${PYEAR}"
+LOGDIR="${OUTDIR}/logs"; mkdir -p "${OUTDIR}" "${LOGDIR}"
+export TMPDIR="${SCRATCH}/tmp_${PBS_JOBID}"; mkdir -p "${TMPDIR}"
+IDS=$(python - <<PY
+import sys; sys.path.insert(0, "$REPO")
+import pandas as pd
+from trace_st.retention import debby_retained
+ids = set()
+for d in ("T4r_debby_vorebuilt", "T4r_debby"):
+    j = pd.read_csv("$R1/" + d + "/results_jobs_final.csv")
+    ids |= set(j.loc[debby_retained(j), "trial_id"].astype(int))
+print(" ".join(str(i) for i in sorted(ids)))
+PY
+)
+echo "$IDS" > "${OUTDIR}/trial_ids_union.txt"
+cd "$REPO/Scripts_Paper" || exit 2
+ARGS=(--n-trials 300 --n-workers 48 --ensemble-size 30 --flush-every 10
+      --vo-input "$IN/vo500700_2006_rebuilt.nc:vo"
+      --extra-inputs "VO_P${PYEAR}=$IN/vo500700_${PYEAR}to2006.nc:vo"
+      --trial-ids $IDS)
+echo "========== JOB INFO =========="
+echo "date: $(date)"; echo "jobid: ${PBS_JOBID}"; echo "host: $(hostname)"
+echo "repo: ${REPO} @ $(git -C "$REPO" describe --tags --always) $(git -C "$REPO" rev-parse HEAD)"
+echo "outdir: ${OUTDIR}"; echo "n_ids: $(echo $IDS | wc -w)"; echo "args: ${ARGS[*]:0:9}"
+echo "=============================="
+python -u 5_DebbyRuns.py --outdir "${OUTDIR}" "${ARGS[@]}" 2>&1 | tee -a "${LOGDIR}/run_${PBS_JOBID}.log"
+echo "python exit: ${PIPESTATUS[0]}"
+echo "Finished at: $(date)"

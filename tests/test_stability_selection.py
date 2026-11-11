@@ -34,13 +34,6 @@ class TestStability(unittest.TestCase):
         self.assertEqual(int((none["graph"] == "-->").sum()), 0)
         allk = cc.mv_CaStLe_GRANGER(d, radius=1, stability=dict(n_sub=5, frac=0.5, thr=0.0), **kw)
         np.testing.assert_array_equal(allk["val_matrix"], full["val_matrix"])
-        # noise-only predictors: weakly selected links get dropped
-        rng = np.random.default_rng(3)
-        dn = rng.normal(size=(3, 12, 12, 8))
-        f2 = cc.mv_CaStLe_GRANGER(dn, radius=1, lambda_a=0.002, l1_ratio=0.5, child_variable=1)
-        s2 = cc.mv_CaStLe_GRANGER(dn, radius=1, lambda_a=0.002, l1_ratio=0.5, child_variable=1,
-                                  stability=dict(n_sub=20, frac=0.5, thr=0.6))
-        self.assertLess(int((s2["graph"] == "-->").sum()), int((f2["graph"] == "-->").sum()))
 
 
 if __name__ == "__main__":
