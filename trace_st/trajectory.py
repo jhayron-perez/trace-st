@@ -208,6 +208,12 @@ def run_track(
     beta_softmax = 100.0 if beta_softmax is None else float(beta_softmax)
     prob_rule = str(params.get("prob_rule", "linear"))
     strength_mode = str(params.get("strength_mode", "native"))
+    # revision-1 (R1 major 2): winner grouping; "dbscan" = original code path
+    grouping = str(params.get("grouping", "dbscan"))
+    if grouping not in ("dbscan", "strongest", "variable_sign", "sectors8", "kmeans"):
+        raise ValueError(f"params['grouping'] must be dbscan/strongest/variable_sign/sectors8/kmeans, got {grouping!r}")
+    kmeans_seed = params.get("kmeans_seed", params.get("seed", None))
+    kmeans_seed = 0 if kmeans_seed is None else int(kmeans_seed)
     if rng is None and params.get("seed", None) is not None:
         rng = np.random.default_rng(int(params["seed"]))
 
@@ -367,7 +373,7 @@ def run_track(
         # ---- MOVEMENT + CHILD UPDATE
         current_lat, current_lon = current_center
 
-        if not averaging_winners:
+        if (not averaging_winners) or grouping == "strongest":
             # fallback mode: use strongest edge for both movement + child
             winner = list_candidates.sort_values("causal_value_abs", ascending=False).iloc[0]
             pos_winner = int(winner.position[0]) % stencil_size  # localize just in case
@@ -399,7 +405,8 @@ def run_track(
                 alpha=alpha,
                 score_mode=score_mode,
                 gamma=gamma,
-                winner_summary=winner_summary
+                winner_summary=winner_summary,
+                **({} if grouping == "dbscan" else dict(grouping=grouping, kmeans_seed=kmeans_seed)),
             )
 
             # 2) set child = parent of the chosen (sign, cluster)

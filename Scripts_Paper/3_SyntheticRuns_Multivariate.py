@@ -1180,10 +1180,12 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 # Evaluate one configuration across all prescribed mixture strengths
 # -----------------------------------------------------------------------------
 def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
-                                      extra_vars=None, strength_mode="native"):
+                                      extra_vars=None, strength_mode="native", grouping="dbscan"):
     params = build_params_from_trial_multivar(trial)
     if strength_mode != "native":
         params["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
+    if grouping != "dbscan":
+        params["grouping"] = str(grouping)  # revision-1 opt-in (E, R1 major 2)
     extra_vars = dict(extra_vars or {})
 
     rows_alpha = []
@@ -1222,6 +1224,8 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             row_alpha.update(summarize_all_vars(case, ensemble_out, params))
         if strength_mode != "native":
             row_alpha["strength_mode"] = str(strength_mode)
+        if grouping != "dbscan":
+            row_alpha["grouping"] = str(grouping)
         rows_alpha.append(row_alpha)
 
         dfm = summary["df_members"].copy()
@@ -1314,7 +1318,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
 # Multiprocessing wrapper for one hyperparameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
-                          extra_vars=None, strength_mode="native"):
+                          extra_vars=None, strength_mode="native", grouping="dbscan"):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1327,6 +1331,7 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED
             seed=seed,
             extra_vars=extra_vars,
             strength_mode=strength_mode,
+            grouping=grouping,
         )
 
         trial_row = out["trial_row"]
@@ -1425,6 +1430,9 @@ def parse_args():
                         help="T9: link-strength definition passed to run_track")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
                         help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
+    parser.add_argument("--grouping", type=str, default="dbscan",
+                        choices=["dbscan", "strongest", "variable_sign", "sectors8", "kmeans"],
+                        help="revision-1 E: winner grouping passed to run_track (default dbscan = original)")
     return parser.parse_args()
 
 
@@ -1468,6 +1476,7 @@ def main():
                            decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta, decoy_sigma=args.decoy_sigma),
         "strength_mode": args.strength_mode,
         "search_space": args.search_space,
+        **({} if args.grouping == "dbscan" else {"grouping": args.grouping}),
         "n_total_trials": len(all_jobs),
         "n_completed_trials_found_at_start": len(completed_ids),
         "n_pending_trials_at_start": len(pending_jobs),
@@ -1539,6 +1548,7 @@ def main():
                      **({} if args.n_decoy == 0 else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
                                                           decoy_sigma=args.decoy_sigma))),
                 args.strength_mode,
+                args.grouping,
             )
             for job in pending_jobs
         ]

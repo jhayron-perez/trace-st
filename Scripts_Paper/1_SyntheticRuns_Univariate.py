@@ -624,7 +624,7 @@ def filter_pending_jobs(all_jobs, completed_keys):
 # -----------------------------------------------------------------------------
 # One independent hyperparameter evaluation
 # -----------------------------------------------------------------------------
-def evaluate_job(job, strength_mode="native"):
+def evaluate_job(job, strength_mode="native", grouping="dbscan"):
     method, trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -665,6 +665,8 @@ def evaluate_job(job, strength_mode="native"):
 
         if strength_mode != "native":
             pbase["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
+        if grouping != "dbscan":
+            pbase["grouping"] = str(grouping)  # revision-1 opt-in (E, R1 major 2)
 
         if method == "granger":
             pbase["cd_kwargs"]["lambda_a"] = trial["lambda_a"]
@@ -795,7 +797,40 @@ def parse_args():
     parser.add_argument("--flush-every", type=int, default=25, help="Write snapshot every N completed jobs")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="revision-1 T9: link-strength definition passed to run_track")
+    parser.add_argument("--grouping", type=str, default="dbscan",
+                        choices=["dbscan", "strongest", "variable_sign", "sectors8", "kmeans"],
+                        help="revision-1 E: winner grouping passed to run_track (default dbscan = original)")
+    parser.add_argument("--methods", type=str, nargs="+", default=None, choices=["granger", "pcmci", "dynotears"],
+                        help="Subset of methods to run (default: all). Configs are drawn for all methods "
+                             "first, so a subset gets the same configs (trial ids) as the full run.")
+    parser.add_argument("--n-configs", type=int, default=None,
+                        help="Run only trial ids < N of each selected method (default: all)")
+    parser.add_argument("--trial-ids", type=str, default=None,
+                        help="Run only these trial ids: comma list '0,5,7' or '@FILE' (one id per line)")
     return parser.parse_args()
+
+
+def parse_trial_ids(spec):
+    if spec is None:
+        return None
+    if spec.startswith("@"):
+        txt = Path(spec[1:]).read_text().replace(",", "\n").split()
+    else:
+        txt = spec.replace(",", " ").split()
+    return sorted({int(x) for x in txt})
+
+
+def select_jobs(all_jobs, methods=None, n_configs=None, trial_ids=None):
+    """Filter the full paper draw (ids unchanged) by method, first N ids and/or explicit ids."""
+    out = all_jobs
+    if methods is not None:
+        out = [j for j in out if j[0] in set(methods)]
+    if n_configs is not None:
+        out = [j for j in out if int(j[1]) < int(n_configs)]
+    if trial_ids is not None:
+        keep = set(trial_ids)
+        out = [j for j in out if int(j[1]) in keep]
+    return out
 
 
 def main():
@@ -811,6 +846,9 @@ def main():
     summary_path = outdir / "run_summary.json"
 
     all_jobs = build_jobs(n_per_method=args.trials_per_method, seed=args.seed)
+    trial_ids = parse_trial_ids(args.trial_ids)
+    if args.methods is not None or args.n_configs is not None or trial_ids is not None:
+        all_jobs = select_jobs(all_jobs, args.methods, args.n_configs, trial_ids)
 
     completed_keys, existing_job_rows = load_completed_job_keys(jobs_jsonl)
     pending_jobs = filter_pending_jobs(all_jobs, completed_keys)
@@ -827,6 +865,10 @@ def main():
         "n_pending_jobs_at_start": len(pending_jobs),
         "methods": ["granger", "pcmci", "dynotears"],
         "strength_mode": args.strength_mode,
+        **({} if args.grouping == "dbscan" else {"grouping": args.grouping}),
+        **({} if args.methods is None else {"methods_run": args.methods}),
+        **({} if args.n_configs is None else {"n_configs": args.n_configs}),
+        **({} if trial_ids is None else {"trial_ids": trial_ids}),
         "updated_at": pd.Timestamp.utcnow().isoformat(),
     }
     atomic_write_json(meta_path, meta)
@@ -881,7 +923,7 @@ def main():
     ctx = mp.get_context("spawn")
 
     with ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx) as ex:
-        futures = [ex.submit(evaluate_job, job, args.strength_mode) for job in pending_jobs]
+        futures = [ex.submit(evaluate_job, job, args.strength_mode, args.grouping) for job in pending_jobs]
 
         for fut in as_completed(futures):
             result = fut.result()
