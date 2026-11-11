@@ -1,7 +1,9 @@
 """Stage 1: extract the Debby domain (lat 40..0, lon -50..40, 0.25 deg) from ERA5 ds633.0 once per
 source file into a small cache, so validation and production read the 1.8 GB/day files only once.
 
-python extract_cache.py CACHE_DIR NPROC
+python extract_cache.py CACHE_DIR NPROC [VO_YEARS]
+VO_YEARS (optional, night-2 A2, e.g. 2003,2004,2007,2008): extract only the 500-700 hPa vorticity for JAS of
+those years (placebo twins). Without it the job list is the original one (vo 2006+2005, d200 2006, CAPE 2006).
 Writes CACHE_DIR/<code>_<YYYYMMDD>.nc (pl: all requested levels kept separately) and
 CACHE_DIR/cape_<YYYYMM>.nc. Spawn pool (fork + netCDF/HDF5 can deadlock).
 """
@@ -22,6 +24,12 @@ for d in pd.date_range("2006-07-01", "2006-09-30", freq="D"):
     JOBS.append(("pl", "128_155_d", "D", [200], d))
 for m in pd.date_range("2006-07-01", "2006-09-01", freq="MS"):
     JOBS.append(("sfc", "128_059_cape", "CAPE", None, m))
+
+
+if len(sys.argv) > 3:
+    JOBS = [("pl", "128_138_vo", "VO", [500, 550, 600, 650, 700], d)
+            for year in (int(y) for y in sys.argv[3].split(","))
+            for d in pd.date_range(f"{year}-07-01", f"{year}-09-30", freq="D")]
 
 
 def subset(da):
