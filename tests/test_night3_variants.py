@@ -139,3 +139,12 @@ class TestVariants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestShortWindow(unittest.TestCase):
+    def test_two_step_window_runs_all_variants(self):
+        d = toy_data(T=2)
+        for v in [dict(gate="block_f"), dict(prewhiten="ar1"), dict(weight="tstat"), dict(gate="cv"),
+                  dict(lambda_rule="universal"), dict(thin=2), dict(gate="knockoff", fdr_q=0.2)]:
+            res = mc.mv_CaStLe_GRANGER(d, variant=v, **KW)
+            self.assertEqual(res["val_matrix"].shape, (27, 27, 2), v)

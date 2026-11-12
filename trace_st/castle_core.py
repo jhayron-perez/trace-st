@@ -3046,7 +3046,7 @@ def _variant_child_fit(
     R = n_rows // T
     X3 = Xall.reshape(R, T, node_count)                  # rows are (cell, time)
 
-    if v.get("prewhiten") == "ar1":
+    if v.get("prewhiten") == "ar1" and T >= 3:   # T < 3: AR(1) not estimable -> no prewhitening
         xm = X3[:, :-1, :]; xp = X3[:, 1:, :]
         xm_c = xm - xm.mean(axis=1, keepdims=True); xp_c = xp - xp.mean(axis=1, keepdims=True)
         den = (xm_c * xm_c).sum(axis=1)
@@ -3054,8 +3054,8 @@ def _variant_child_fit(
         X3 = xp_c - phi[:, None, :] * xm_c                # (R, T-1, N) AR(1) residuals
         info["prewhiten_phi_median"] = float(np.median(phi))
     Tw = X3.shape[1]
-    if Tw < 3:
-        raise ValueError("variant: too few time steps after prewhitening")
+    if Tw < 2:
+        raise ValueError("variant: need at least 2 time steps")
 
     X = X3[:, :-1, :].reshape(-1, node_count)            # predictors at t-1
     y = X3[:, 1:, child_node].reshape(-1)                # child at t
@@ -3164,7 +3164,7 @@ def _variant_child_fit(
         nf = int(v.get("cv_folds", 5))
         gap = int(np.ceil(_decorr_steps((y - y.mean()).reshape(Rr, Tp)))) if Rr * Tp == n else 1
         tu = np.unique(tpair)
-        folds = np.array_split(tu, nf)
+        folds = [fo for fo in np.array_split(tu, nf) if fo.size]
 
         def cv_mse(cols):
             err = 0.0
