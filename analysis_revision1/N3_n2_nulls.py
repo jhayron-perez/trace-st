@@ -29,6 +29,7 @@ R1 = C.R1
 N2 = R1 / "night3" / "n2" / "base"
 OUT = R1 / "night3" / "analysis"
 YEARS = (2006, 2011, 2012, 2018, 2020)
+YEARS_EXTRA = (1996, 1998, 1999, 2008, 2010)  # np.random.default_rng(2022) draw, night3/n2_years10.py
 DEBBY3 = ["Tb", "vo", "precip"]
 
 
@@ -40,9 +41,13 @@ def runs():
         for k in (-30, -15, 15, 30):
             out.append(("pnw", "time", N2 / f"pnw_{s}_S{k}", PNW6 + [f"{nm}_P2021S{k:+d}"], nm, f"{nm}_P2021S{k:+d}", "add"))
         out.append(("pnw", "space", N2 / f"pnw_{s}_L20", PNW6 + [f"{nm}_P2021L+20"], nm, f"{nm}_P2021L+20", "add"))
-    for s in ("tcwv", "olr", "slhf"):
+    for s in ("tcwv", "olr", "slhf", "sshf"):
         nm = PNW_STEM[s]
-        for y in YEARS:
+        # 10-year null (brief N2, if time): OLR, SLHF, SSHF also use 5 extra years (seed 2022 draw)
+        yrs = YEARS if s == "tcwv" else YEARS + YEARS_EXTRA
+        for y in yrs:
+            if not (N2 / f"pnw_{s}_rep{y}").exists():
+                continue
             v = [f"{nm}_P{y}" if x == nm else x for x in PNW6]
             out.append(("pnw", "replace_year", N2 / f"pnw_{s}_rep{y}", v, nm, f"{nm}_P{y}", "replace"))
     for n, fam in (("SM10", "time"), ("SM5", "time"), ("SP5", "time"), ("SP10", "time"), ("L10", "space"), ("L20", "space")):
