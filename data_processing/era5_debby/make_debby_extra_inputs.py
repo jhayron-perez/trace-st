@@ -109,17 +109,39 @@ def standardize(da, stdz="hour"):
     return (da - da.mean("time")) / da.std("time")
 
 
-def build(field, year, relabel_year=2006, stdz="hour", levels=None, nproc=8, cache=None):
+def select_window(an, year, shift_days=0):
+    """Event window of `year`; night-3 N2 (opt-in): shift_days != 0 takes the window K days later
+    (K < 0: earlier) from the same JAS anomalies and relabels it back onto the event dates."""
+    k = pd.Timedelta(days=int(shift_days))
+    t0 = pd.Timestamp(f"{year}-{WIN[0]}") + k
+    t1 = pd.Timestamp(f"{year}-{WIN[1]}") + k
+    an = an.sel(time=slice(t0, t1))
+    if int(shift_days) != 0:
+        an = an.assign_coords(time=pd.to_datetime(an.time.values) - k)
+    return an
+
+
+def roll_lon(an, shift_lon=0.0):
+    """Night-3 N2 (opt-in): shift the field east by shift_lon degrees, wrapping inside the domain
+    (values leaving the east edge re-enter at the west edge); coordinates unchanged."""
+    if not shift_lon:
+        return an
+    dlon = float(an.longitude[1] - an.longitude[0])
+    return an.roll(longitude=int(round(float(shift_lon) / dlon)), roll_coords=False)
+
+
+def build(field, year, relabel_year=2006, stdz="hour", levels=None, nproc=8, cache=None, shift_days=0, shift_lon=0.0):
     da = load_jas(field, year, levels=levels, nproc=nproc, cache=cache)
     an = standardize(da, stdz)
-    an = an.sel(time=slice(f"{year}-{WIN[0]}", f"{year}-{WIN[1]}"))
+    an = roll_lon(select_window(an, year, shift_days), shift_lon)
     if relabel_year != year:
         t = pd.to_datetime(an.time.values)
         an = an.assign_coords(time=[ts.replace(year=relabel_year) for ts in t])
     an = an.drop_vars([c for c in an.coords if c not in ("time", "latitude", "longitude")])
     an = an.assign_coords(hour=("time", pd.to_datetime(an.time.values).hour.astype("int64")))
     out = an.astype("float32").rename(SPEC[field]["out"])
-    out.attrs = dict(source="ERA5 ds633.0 " + SPEC[field]["code"], year_source=int(year),
+    extra = dict(shift_days=int(shift_days), shift_lon=float(shift_lon)) if (shift_days or shift_lon) else {}
+    out.attrs = dict(source="ERA5 ds633.0 " + SPEC[field]["code"], year_source=int(year), **extra,
                      year_label=int(relabel_year), levels_hPa=str(levels or SPEC[field]["levels"]),
                      standardization=f"per grid cell, JAS {year}, by={stdz}")
     assert out.sizes["time"] == 432, out.sizes
@@ -136,8 +158,10 @@ def main():
     ap.add_argument("--nproc", type=int, default=8)
     ap.add_argument("--cache", default=None, help="extract_cache.py output dir")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--shift-days", type=int, default=0, help="N2 null: window K days later (same JAS), relabelled")
+    ap.add_argument("--shift-lon", type=float, default=0.0, help="N2 null: shift east by D degrees, wrap in domain")
     a = ap.parse_args()
-    out = build(a.field, a.year, a.relabel_year, a.stdz, a.levels, a.nproc, a.cache)
+    out = build(a.field, a.year, a.relabel_year, a.stdz, a.levels, a.nproc, a.cache, a.shift_days, a.shift_lon)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     out.to_dataset().to_netcdf(a.out)
     print("wrote", a.out, dict(out.sizes))

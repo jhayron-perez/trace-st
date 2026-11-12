@@ -106,29 +106,61 @@ def regrid_to_2p5(full_data: xr.DataArray) -> xr.DataArray:
     return full_data_2p5
 
 
-def load_placebo_vars(varstems: List[str], year: int) -> xr.DataArray:
+def load_placebo_vars(varstems: List[str], year: int, shift_days: int = 0, shift_lon: float = 0.0) -> xr.DataArray:
     """Revision-1 T8 placebos: same calendar window and anomaly files, taken from `year`,
-    time coordinate relabeled to 2021; variables named '<NAME>_P<year>'."""
+    time coordinate relabeled to 2021; variables named '<NAME>_P<year>'.
+    Night-3 N2 (opt-in; defaults = original): shift_days K takes the window K days later from the
+    same year's anomaly file (real data outside the window, no wrap) and relabels it onto the event
+    dates; shift_lon D shifts the field east by D degrees (global grid, periodic). Names get
+    'S<K>' / 'L<D>' suffixes."""
     ts = tuple(t.replace("2021", str(int(year))) for t in TIME_SLICE)
+    k = pd.Timedelta(days=int(shift_days))
+    if int(shift_days) != 0:
+        ts = tuple((pd.Timestamp(t) + k).strftime("%Y-%m-%d") for t in ts)
+    suffix = f"_P{int(year)}"
+    if int(shift_days) != 0:
+        suffix += f"S{int(shift_days):+d}"
+    if shift_lon:
+        suffix += f"L{float(shift_lon):+g}"
     da = tst.data_io.load_full_data(
         path_files=PATH_FILES,
         varstems=varstems,
-        list_names_vars=[f"{VAR_NAME_MAP[v]}_P{int(year)}" for v in varstems],
+        list_names_vars=[f"{VAR_NAME_MAP[v]}{suffix}" for v in varstems],
         time_slice=ts,
         join="inner",
     )
     t = pd.to_datetime(da.time.values)
-    return da.assign_coords(time=[x.replace(year=2021) for x in t])
+    if int(shift_days) != 0:
+        t = t - k
+    da = da.assign_coords(time=[x.replace(year=2021) for x in t])
+    if shift_lon:
+        dlon = float(da.lon[1] - da.lon[0])
+        da = da.roll(lon=int(round(float(shift_lon) / dlon)), roll_coords=False)
+    return da
 
 
-def build_case_pnw(var_combo: List[str] | None = None, placebo_vars=None, placebo_year=2010) -> dict:
+def build_case_pnw(var_combo: List[str] | None = None, placebo_vars=None, placebo_year=2010,
+                   placebo_shift_days: int = 0, placebo_shift_lon: float = 0.0,
+                   placebo_mode: str = "add") -> dict:
     if var_combo is None:
         var_combo = VAR_COMBOS[0]
 
     full_data = load_full_data_for_vars(var_combo)
     if placebo_vars:
-        plc = load_placebo_vars(list(placebo_vars), placebo_year)
-        full_data = xr.concat([full_data, plc.transpose(*full_data.dims)], dim="var", join="inner")
+        plc = load_placebo_vars(list(placebo_vars), placebo_year, placebo_shift_days, placebo_shift_lon)
+        if placebo_mode == "replace":
+            # night-3 N2 (opt-in): swap each placebo in at the position of its original (p unchanged)
+            if var_combo[0] in placebo_vars:
+                raise ValueError("placebo_mode='replace' cannot replace the target variable (child_of_interest=1)")
+            plc = plc.transpose(*full_data.dims)
+            rep = {VAR_NAME_MAP[v]: str(n) for v, n in zip(placebo_vars, plc["var"].values)}
+            parts = [plc.sel(var=rep[str(n)]) if str(n) in rep else full_data.sel(var=n)
+                     for n in full_data["var"].values]
+            full_data = xr.concat(parts, dim="var", join="inner")
+        elif placebo_mode == "add":
+            full_data = xr.concat([full_data, plc.transpose(*full_data.dims)], dim="var", join="inner")
+        else:
+            raise ValueError(f"placebo_mode must be 'add' or 'replace', got {placebo_mode!r}")
     full_data = regrid_to_2p5(full_data)
 
     params_base = dict(
@@ -1002,6 +1034,11 @@ def parse_args():
     parser.add_argument("--placebo-vars", type=str, nargs="+", default=None,
                         help="Var stems to add as wrong-year placebos (e.g. z500 tcwv)")
     parser.add_argument("--placebo-year", type=int, default=2010, help="Source year of the placebos")
+    # night-3 N2 opt-in nulls; defaults = original
+    parser.add_argument("--placebo-shift-days", type=int, default=0, help="N2: placebo window K days later, relabelled")
+    parser.add_argument("--placebo-shift-lon", type=float, default=0.0, help="N2: placebo shifted east by D degrees")
+    parser.add_argument("--placebo-mode", type=str, default="add", choices=["add", "replace"],
+                        help="N2: add the placebo (original) or replace the original variable by it")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
                         help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
     parser.add_argument("--run-ids", type=int, nargs="+", default=None,
@@ -1018,7 +1055,9 @@ def main():
     args = parse_args()
 
     print("Loading PNW21 data...", flush=True)
-    case = build_case_pnw(placebo_vars=args.placebo_vars, placebo_year=args.placebo_year)
+    case = build_case_pnw(placebo_vars=args.placebo_vars, placebo_year=args.placebo_year,
+                          placebo_shift_days=args.placebo_shift_days, placebo_shift_lon=args.placebo_shift_lon,
+                          placebo_mode=args.placebo_mode)
     full_data_run = case["full_data"]
 
     print(full_data_run, flush=True)
