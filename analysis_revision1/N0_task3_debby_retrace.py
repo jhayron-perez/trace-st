@@ -40,8 +40,8 @@ CASE = None
 
 def init(year):
     global CASE
-    CASE = D.build_case_debby(extra_inputs=[f"VO_P{year}={IN}/vo500700_{year}to2006.nc:vo"],
-                              vo_input=f"{IN}/vo500700_2006_rebuilt.nc:vo")
+    CASE = D.build_case_debby(extra_inputs=[(f"VO_P{year}", f"{IN}/vo500700_{year}to2006.nc", "vo")],
+                              vo_input=(f"{IN}/vo500700_2006_rebuilt.nc", "vo"))
 
 
 def one(args):
@@ -94,7 +94,8 @@ def main():
     tasks = [(int(t), trials[int(t)], a.M, a.year, str(out)) for t in sel.trial_id]
     sel[["trial_id", "ratio", "q", "box_size", "radius", "timewindow"]].to_csv(out / "selected_configs.csv", index=False)
     ctx = get_context("fork")
-    with ctx.Pool(a.nproc, initializer=init, initargs=(a.year,)) as pool:
+    init(a.year)  # build once in the parent (fails fast; fork shares CASE)
+    with ctx.Pool(a.nproc) as pool:
         res = pool.map(one, tasks, chunksize=1)
     pd.DataFrame(res).to_csv(out / "check.csv", index=False)
     print(pd.DataFrame(res).to_string())
