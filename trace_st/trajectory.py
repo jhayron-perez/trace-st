@@ -11,6 +11,8 @@ Core loop:
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -129,7 +131,25 @@ def get_mcastle_box(
             max_iter=5000,
         )
         kwargs.update(cd_kwargs)
-    
+        # night-3 (opt-in): EN variant from env TST_VARIANT (JSON); unset/empty = original path
+        _venv = os.environ.get("TST_VARIANT", "")
+        if _venv and "variant" not in kwargs:
+            _var = json.loads(_venv)
+            if "stability" in _var:
+                kwargs["stability"] = _var.pop("stability")
+            if _var:
+                kwargs["variant"] = _var
+                if _var.get("gate") in ("pcmci_vars", "pcmci_links"):
+                    _pc = mcastle.mv_CaStLe_PC(
+                        datacastlebox, cond_ind_test=ParCorr(significance="analytic"),
+                        cd_function="run_pcmci", pc_alpha=float(_var.get("pc_alpha", 0.01)),
+                        graph_p_threshold=float(_var.get("pc_graph_p", 0.01)), min_tau=1,
+                        y_ascending=bool(kwargs.get("y_ascending", True)), fdr_method=None,
+                        intervariable_link_assumptions=None, allow_center_directed_links=True,
+                        dependencies_wrap=bool(kwargs.get("dependencies_wrap", False)), verbose=0,
+                        radius=int(radius), child_variable=child_variable)
+                    kwargs["pc_graph"] = _pc["graph"]
+
         results = mcastle.mv_CaStLe_GRANGER(datacastlebox, **kwargs)
         learned_stencil_graph = results["graph"]
         learned_stencil_vals  = results["val_matrix"]

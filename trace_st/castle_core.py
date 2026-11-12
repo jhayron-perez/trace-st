@@ -2935,7 +2935,290 @@ def _lasso_single_child_lag1(
 
     return graph, val
 
-    
+
+# -----------------------------------------------------------------------------
+# Revision-1 night 3 (opt-in): EN variants (gates, prewhitening, t-weights, ...)
+# Used only when mv_CaStLe_GRANGER(variant=...) is given; variant=None keeps the
+# original path (_lasso_single_child_lag1) untouched.
+# -----------------------------------------------------------------------------
+def _ar1_rho(Z: np.ndarray) -> float:
+    """Pooled lag-1 autocorrelation of series Z (R, T), demeaned per row, clipped to [0, 0.99]."""
+    Z = np.asarray(Z, dtype=float)
+    if Z.shape[1] < 3:
+        return 0.0
+    Zc = Z - Z.mean(axis=1, keepdims=True)
+    den = float((Zc * Zc).sum())
+    if den <= 0:
+        return 0.0
+    rho = float((Zc[:, 1:] * Zc[:, :-1]).sum()) / den
+    return float(np.clip(rho, 0.0, 0.99))
+
+
+def _neff(resid_RT: np.ndarray) -> float:
+    """Bartlett/AR(1) effective sample size n (1 - rho) / (1 + rho) of residuals laid out (R, T)."""
+    rho = _ar1_rho(resid_RT)
+    return float(resid_RT.size) * (1.0 - rho) / (1.0 + rho)
+
+
+def _decorr_steps(Z: np.ndarray) -> float:
+    """AR(1) decorrelation time -1/ln(rho) in steps (>= 1)."""
+    rho = _ar1_rho(Z)
+    if rho <= 0.0:
+        return 1.0
+    return max(1.0, -1.0 / np.log(rho))
+
+
+def _ols_rss(X: np.ndarray, y: np.ndarray, cols: np.ndarray):
+    """OLS with intercept on X[:, cols]; returns (rss, rank incl. intercept, residuals)."""
+    A = np.column_stack([np.ones(X.shape[0]), X[:, cols]]) if cols.size else np.ones((X.shape[0], 1))
+    coef, _, rank, _ = np.linalg.lstsq(A, y, rcond=None)
+    r = y - A @ coef
+    return float(r @ r), int(rank), r
+
+
+def _en_fit(X, y, cols, *, alpha, l1_ratio, standardize, refit_ridge, ridge_alpha,
+            fit_intercept, max_iter, dependence_threshold):
+    """Same steps as _lasso_single_child_lag1 on columns `cols` only.
+    Returns (w full length, intercept) in original X units."""
+    N = X.shape[1]
+    w_full = np.zeros(N)
+    if cols.size == 0:
+        return w_full, float(y.mean())
+    Xs = X[:, cols]
+    if standardize:
+        mu = Xs.mean(axis=0); sd = Xs.std(axis=0); sd[sd < 1e-12] = 1.0
+        Z = (Xs - mu) / sd
+    else:
+        mu = np.zeros(cols.size); sd = np.ones(cols.size); Z = Xs
+    if l1_ratio is None:
+        from sklearn.linear_model import Lasso
+        m = Lasso(alpha=float(alpha), fit_intercept=bool(fit_intercept), max_iter=int(max_iter))
+    else:
+        from sklearn.linear_model import ElasticNet
+        m = ElasticNet(alpha=float(alpha), l1_ratio=float(l1_ratio), fit_intercept=bool(fit_intercept),
+                       max_iter=int(max_iter))
+    m.fit(Z, y)
+    w = np.asarray(m.coef_, dtype=float); b0 = float(m.intercept_)
+    sup = np.where(np.abs(w) >= float(dependence_threshold))[0]
+    if refit_ridge and sup.size > 0:
+        from sklearn.linear_model import Ridge
+        rg = Ridge(alpha=float(ridge_alpha), fit_intercept=bool(fit_intercept)).fit(Z[:, sup], y)
+        w2 = np.zeros_like(w); w2[sup] = np.asarray(rg.coef_, dtype=float); w = w2; b0 = float(rg.intercept_)
+    w = w / sd
+    b0 = b0 - float((w * mu).sum())
+    w_full[cols] = w
+    return w_full, b0
+
+
+def _knockoff_plus_threshold(W: np.ndarray, q: float, offset: int = 1) -> float:
+    """Knockoff+ (offset 1) or knockoff (offset 0) threshold (Barber & Candes 2015); np.inf if none."""
+    ts = np.sort(np.unique(np.abs(W[W != 0])))
+    for t in ts:
+        if (float(offset) + np.sum(W <= -t)) / max(1.0, float(np.sum(W >= t))) <= q:
+            return float(t)
+    return float(np.inf)
+
+
+def _variant_child_fit(
+    reduced_space: np.ndarray, *, node_count: int, child_node: int, T: int, stencil_size: int,
+    lambda_a: float, l1_ratio, dependence_threshold: float, fit_intercept: bool, max_iter: int,
+    standardize: bool, refit_ridge: bool, ridge_alpha: float, variant: Dict[str, Any],
+    pc_graph: Optional[np.ndarray] = None,
+):
+    """One child, lag-1, with the opt-in night-3 variant options (all optional keys):
+
+    prewhiten: "ar1"   AR(1) fit per stencil column and cell on the window; regress residuals (P).
+    thin: k            keep every k-th (t-1 -> t) pair in time (S).
+    lambda_rule: "universal", lambda_c: c
+                       standardized X, L1 weight = c * sigma * sqrt(2 log p / n_eff) (G-universal).
+    gate: "block_f" (gate_alpha), "pcmci_vars", "pcmci_links" (needs pc_graph), "knockoff" (fdr_q; fdr_offset 1 = knockoff+, 0 = knockoff),
+          "cv" (cv_folds)  -- act on the other variables' blocks only; the child's own block is kept.
+    weight: "tstat"    link value = sign(w) |w / SE| (OLS on the EN support, effective n) (T);
+            "tgate"    keep w, zero links with |t| <= t_min (default 2) (T').
+    Returns (graph, val) in the same format as _lasso_single_child_lag1 plus an info dict.
+    """
+    v = dict(variant)
+    info: Dict[str, Any] = {}
+    Xall = np.asarray(reduced_space, dtype=float)
+    n_rows = Xall.shape[0]
+    if n_rows % T != 0:
+        raise ValueError(f"reduced_space rows ({n_rows}) not divisible by T ({T}).")
+    R = n_rows // T
+    X3 = Xall.reshape(R, T, node_count)                  # rows are (cell, time)
+
+    if v.get("prewhiten") == "ar1":
+        xm = X3[:, :-1, :]; xp = X3[:, 1:, :]
+        xm_c = xm - xm.mean(axis=1, keepdims=True); xp_c = xp - xp.mean(axis=1, keepdims=True)
+        den = (xm_c * xm_c).sum(axis=1)
+        phi = np.where(den > 1e-12, (xm_c * xp_c).sum(axis=1) / np.where(den > 1e-12, den, 1.0), 0.0)
+        X3 = xp_c - phi[:, None, :] * xm_c                # (R, T-1, N) AR(1) residuals
+        info["prewhiten_phi_median"] = float(np.median(phi))
+    Tw = X3.shape[1]
+    if Tw < 3:
+        raise ValueError("variant: too few time steps after prewhitening")
+
+    X = X3[:, :-1, :].reshape(-1, node_count)            # predictors at t-1
+    y = X3[:, 1:, child_node].reshape(-1)                # child at t
+    tpair = np.tile(np.arange(Tw - 1), R)                 # time index of each pair
+    k = int(v.get("thin", 1) or 1)
+    keep_rows = (tpair % k == 0) if k > 1 else np.ones(X.shape[0], dtype=bool)
+    X = X[keep_rows]; y = y[keep_rows]; tpair = tpair[keep_rows]
+    Rr, Tp = R, int(keep_rows.reshape(R, Tw - 1)[0].sum())   # layout (R, Tp) for n_eff
+    n = X.shape[0]
+
+    n_vars = node_count // stencil_size
+    blk = np.arange(node_count) // stencil_size
+    own = int(child_node) // stencil_size
+    allowed = np.ones(node_count, dtype=bool)
+
+    gate = v.get("gate")
+    if gate in ("pcmci_vars", "pcmci_links"):
+        if pc_graph is None:
+            raise ValueError("variant gate pcmci_* needs pc_graph")
+        par = np.asarray(pc_graph[:, child_node, 1] == "-->")
+        if gate == "pcmci_vars":
+            kept_vars = set(np.unique(blk[par]).tolist()) | {own}
+            allowed = np.isin(blk, list(kept_vars))
+        else:
+            allowed = par | (blk == own)
+    elif gate == "block_f":
+        from scipy.stats import f as fdist
+        ga = float(v.get("gate_alpha", 0.05))
+        cols_all = np.arange(node_count)
+        rss_f, rk_f, res_f = _ols_rss(X, y, cols_all)
+        ne = _neff(res_f.reshape(Rr, Tp)) if Rr * Tp == n else float(n)
+        df2 = ne - rk_f
+        cond_full = df2 >= 10
+        info["block_f_conditioning"] = "all_blocks" if cond_full else "own_block"
+        for b in range(n_vars):
+            if b == own:
+                continue
+            if cond_full:
+                base = cols_all
+            else:
+                base = np.where((blk == own) | (blk == b))[0]
+                rss_f, rk_f, res_f = _ols_rss(X, y, base)
+                ne = _neff(res_f.reshape(Rr, Tp)) if Rr * Tp == n else float(n)
+                df2 = ne - rk_f
+            red = base[blk[base] != b]
+            rss_r, rk_r, _ = _ols_rss(X, y, red)
+            df1 = max(rk_f - rk_r, 1)
+            if df2 < 1 or rss_f <= 0:
+                pval = 1.0
+            else:
+                F = ((rss_r - rss_f) / df1) / (rss_f / df2)
+                pval = float(fdist.sf(max(F, 0.0), df1, df2))
+            if pval >= ga:
+                allowed[blk == b] = False
+
+    # --- penalty ---
+    std_eff = bool(standardize)
+    alpha_eff = float(lambda_a)
+    if v.get("lambda_rule") == "universal":
+        std_eff = True
+        c = float(v.get("lambda_c", 1.0))
+        cols = np.where(allowed)[0]
+        p = max(int(cols.size), 2)
+        if n - p - 1 >= 10:
+            rss, rk, res = _ols_rss(X, y, cols)
+            sig = np.sqrt(rss / max(n - rk, 1)); ne = _neff(res.reshape(Rr, Tp)) if Rr * Tp == n else float(n)
+        else:
+            sig = float(y.std()); ne = _neff((y - y.mean()).reshape(Rr, Tp)) if Rr * Tp == n else float(n)
+        lam = c * sig * np.sqrt(2.0 * np.log(p) / max(ne, 2.0))
+        alpha_eff = lam / (float(l1_ratio) if l1_ratio is not None else 1.0)
+        info["lambda_universal"] = float(alpha_eff)
+    fitkw = dict(alpha=alpha_eff, l1_ratio=l1_ratio, standardize=std_eff, refit_ridge=refit_ridge,
+                 ridge_alpha=ridge_alpha, fit_intercept=fit_intercept, max_iter=max_iter,
+                 dependence_threshold=dependence_threshold)
+
+    if gate == "knockoff":
+        q = float(v.get("fdr_q", 0.1))
+        other = np.where(allowed & (blk != own))[0]
+        if other.size:
+            # knockoff copy of each other variable: circular time shift (within the window) of that
+            # variable's stencil block by s >= 2 x its decorrelation time (capped at Tw // 2)
+            Xk_parts = []
+            for b in np.unique(blk[other]):
+                cb = np.where(blk == b)[0]
+                centre = b * stencil_size + stencil_size // 2
+                s = int(np.ceil(2.0 * _decorr_steps(X3[:, :, centre])))
+                s = int(min(max(s, 1), max(Tw // 2, 1)))
+                sh = np.roll(X3[:, :, cb], -s, axis=1)
+                Xk_parts.append((cb, sh[:, :-1, :].reshape(-1, cb.size)[keep_rows]))
+            kcols = np.concatenate([cb for cb, _ in Xk_parts])
+            Xk = np.column_stack([xk for _, xk in Xk_parts])
+            Xaug = np.column_stack([X, Xk])
+            cols_aug = np.concatenate([np.where(allowed)[0], node_count + np.arange(kcols.size)])
+            w_aug, _ = _en_fit(Xaug, y, cols_aug, **fitkw)
+            # compare on the standardized scale so real and knockoff coefficients are comparable
+            sd_r = X[:, kcols].std(axis=0); sd_k = Xk.std(axis=0)
+            Wst = np.abs(w_aug[kcols]) * sd_r - np.abs(w_aug[node_count:]) * sd_k
+            mask_other = np.isin(kcols, other)
+            Wo = Wst[mask_other]; co = kcols[mask_other]
+            tau = _knockoff_plus_threshold(Wo, q, int(v.get("fdr_offset", 1)))
+            sel = co[Wo >= tau] if np.isfinite(tau) else np.array([], dtype=int)
+            drop = np.setdiff1d(other, sel)
+            allowed[drop] = False
+            info["knockoff_kept"] = int(sel.size)
+    elif gate == "cv":
+        nf = int(v.get("cv_folds", 5))
+        gap = int(np.ceil(_decorr_steps((y - y.mean()).reshape(Rr, Tp)))) if Rr * Tp == n else 1
+        tu = np.unique(tpair)
+        folds = np.array_split(tu, nf)
+
+        def cv_mse(cols):
+            err = 0.0
+            for fo in folds:
+                lo, hi = fo.min(), fo.max()
+                te = (tpair >= lo) & (tpair <= hi)
+                tr = (tpair < lo - gap) | (tpair > hi + gap)
+                if tr.sum() < 5 or te.sum() < 1:
+                    continue
+                w, b0 = _en_fit(X[tr], y[tr], cols, **fitkw)
+                e = y[te] - (X[te] @ w + b0)
+                err += float(e @ e)
+            return err
+
+        base_cols = np.where(allowed)[0]
+        mse_all = cv_mse(base_cols)
+        for b in np.unique(blk[base_cols]):
+            if b == own:
+                continue
+            cols_wo = base_cols[blk[base_cols] != b]
+            if cv_mse(cols_wo) <= mse_all:   # the block does not improve held-out MSE -> drop it
+                allowed[blk == b] = False
+
+    cols = np.where(allowed)[0]
+    w, b0 = _en_fit(X, y, cols, **fitkw)
+    sup = np.where(np.abs(w) >= float(dependence_threshold))[0]
+
+    wt = v.get("weight")
+    if wt in ("tstat", "tgate") and sup.size:
+        A = np.column_stack([np.ones(n), X[:, sup]])
+        coef, _, rk, _ = np.linalg.lstsq(A, y, rcond=None)
+        res = y - A @ coef
+        ne = _neff(res.reshape(Rr, Tp)) if Rr * Tp == n else float(n)
+        dfr = max(ne - rk, 1.0)
+        s2 = float(res @ res) / dfr
+        G = np.linalg.pinv(A.T @ A)
+        se = np.sqrt(np.maximum(np.diag(G)[1:] * s2 * (n / max(ne, 1.0)), 1e-300))
+        tval = coef[1:] / se
+        if wt == "tstat":
+            w_new = np.zeros_like(w); w_new[sup] = np.sign(w[sup]) * np.abs(tval); w = w_new
+        else:
+            tmin = float(v.get("t_min", 2.0))
+            w = w.copy(); w[sup[np.abs(tval) <= tmin]] = 0.0
+
+    graph = np.empty((node_count, node_count, 2), dtype=object)
+    graph[:] = ""
+    val = np.zeros((node_count, node_count, 2), dtype=float)
+    for j in range(node_count):
+        if abs(w[j]) >= float(dependence_threshold):
+            graph[j, child_node, 1] = "-->"
+            val[j, child_node, 1] = w[j]
+    return graph, val, info
+
+
 def mv_CaStLe_GRANGER(
     data: np.ndarray,
     *,
@@ -2957,6 +3240,8 @@ def mv_CaStLe_GRANGER(
     strength_threshold: Optional[float] = None,
     fit_intercept: bool = True,          # ← ADD THIS
     stability: Optional[Dict[str, Any]] = None,
+    variant: Optional[Dict[str, Any]] = None,   # night-3 (opt-in): see _variant_child_fit
+    pc_graph: Optional[np.ndarray] = None,      # night-3: PCMCI graph for gate pcmci_vars/pcmci_links
 ) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
     """stability (night-2 D4, opt-in; default None = unchanged): dict(n_sub=20, frac=0.5, thr=0.6, seed=0).
     Refit the same sparse model on n_sub random subsamples (fraction frac, without replacement) of the
@@ -3003,7 +3288,17 @@ def mv_CaStLe_GRANGER(
     val = np.zeros((node_count, node_count, 2), dtype=float)
 
     for child_node in center_nodes:
-        g1, v1 = _lasso_single_child_lag1(
+        if variant is not None:
+            # night-3 opt-in variant path (variant=None never reaches here)
+            g1, v1, _vinfo = _variant_child_fit(
+                reduced_space, node_count=node_count, child_node=int(child_node), T=T,
+                stencil_size=stencil_size, lambda_a=float(lambda_a),
+                l1_ratio=float(l1_ratio) if l1_ratio is not None else None,
+                dependence_threshold=float(dependence_threshold), fit_intercept=bool(fit_intercept),
+                max_iter=int(max_iter), standardize=bool(standardize), refit_ridge=bool(refit_ridge),
+                ridge_alpha=float(ridge_alpha), variant=variant, pc_graph=pc_graph)
+        else:
+          g1, v1 = _lasso_single_child_lag1(
             reduced_space,
             node_count=node_count,
             child_node=int(child_node),
