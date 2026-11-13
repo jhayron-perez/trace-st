@@ -94,7 +94,7 @@ def part_syn(a):
     # T7 decoy sweep (proxy decoys), all methods with the cells present
     dec = []
     for tag, root in (("night3_n4", N3 / "n4"), ("night3_bed", N3 / "bed"), ("night4_b1", N4 / "b1"),
-                      ("night4_c", N4 / "c")):
+                      ("night4_c", N4 / "c"), ("night3_d4", N3 / "d4")):
         for d in glob.glob(str(root / "*" / "*")):
             d = Path(d); x = load_first(d, ["results_alphas_final.csv", "results_alphas_snapshot.csv"])
             if x is None or "t7_share_density_decoy" not in x:
