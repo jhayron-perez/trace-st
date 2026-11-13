@@ -130,8 +130,12 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
 
 def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
                       sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1,
-                      moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0):
+                      moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0, decoy_driver="parent", B=None):
     """Revision-1 T7 non-causal variables (none of them enters B's equation).
+
+    Night-4 C (opt-in): decoy_driver="child" makes every decoy a response decoy driven by the child B:
+    D[t] = phi D[t-1] + beta B[t-1] + AR(1) noise (same noise, seed and clipping), named "D<k>_B".
+    Default "parent" = the original decoys (driven by A or C).
 
     noise k  : independent smoothed AR(1) field, same construction as the A/C noise
                (make_spatiotemporal_ar1_noise, phi=0.85, sigma=0.10), seed + 100 + k.
@@ -157,6 +161,12 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
         out.append(build_dataarray(name, arr, time_coord, ys, xs)); info.append((name, "noise"))
     for k in range(int(n_decoy)):
         X = A if k % 2 == 0 else C
+        if decoy_driver == "child":
+            if B is None:
+                raise ValueError("decoy_driver=child needs B")
+            X = B
+        elif decoy_driver != "parent":
+            raise ValueError(f"decoy_driver {decoy_driver!r}")
         nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=float(decoy_sigma), rng=np.random.default_rng(seed + 200 + k))
         D = np.zeros_like(A, dtype=np.float32)
         D[0] = nz[0]
@@ -164,7 +174,7 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
             D[t] = float(decoy_phi) * D[t - 1] + float(decoy_beta) * X[t - 1] + nz[t]
         if clip_to_positive:
             D = np.clip(D, 0.0, None)
-        name = f"D{k + 1}_{'A' if k % 2 == 0 else 'C'}"
+        name = f"D{k + 1}_{'A' if k % 2 == 0 else 'C'}" if decoy_driver == "parent" else f"D{k + 1}_B"
         out.append(build_dataarray(name, D, time_coord, ys, xs)); info.append((name, "decoy"))
     for k in range(int(n_moving)):
         if moving_placement == "random":
@@ -282,6 +292,7 @@ def build_multivariate_case(
     moving_placement="event",
     moving_offset=15.0,
     moving_tc_lag=2.0,
+    decoy_driver="parent",
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
     (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars.
@@ -385,6 +396,7 @@ def build_multivariate_case(
             sig_y=sig_y, sig_x=sig_x, seed=seed, clip_to_positive=clip_to_positive,
             decoy_phi=decoy_phi, decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
             moving_placement=moving_placement, moving_offset=moving_offset, moving_tc_lag=moving_tc_lag,
+            **({} if decoy_driver == "parent" else dict(decoy_driver=decoy_driver, B=B)),
         )
 
     full_data_run = xr.concat([full_data_A, full_data_B, full_data_C] + extra_list, dim="var")
@@ -1459,6 +1471,8 @@ def parse_args():
     parser.add_argument("--decoy-phi", type=float, default=0.8, help="T7: decoy memory D[t-1] coefficient")
     parser.add_argument("--decoy-beta", type=float, default=0.8, help="T7: decoy coupling to A or C at t-1")
     parser.add_argument("--decoy-sigma", type=float, default=0.1, help="T7: decoy AR(1) noise sigma")
+    parser.add_argument("--decoy-driver", type=str, default="parent", choices=["parent", "child"],
+                        help="night-4 C: decoys driven by A/C (parent, default = original) or by the child B (response decoy)")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="T9: link-strength definition passed to run_track")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
@@ -1494,6 +1508,8 @@ def night2_case_kwargs(args):
         kw["moving_offset"] = float(args.moving_offset)
     if args.moving_tc_lag != 2.0:
         kw["moving_tc_lag"] = float(args.moving_tc_lag)
+    if args.decoy_driver != "parent":
+        kw["decoy_driver"] = args.decoy_driver
     return kw
 
 
