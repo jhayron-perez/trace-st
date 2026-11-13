@@ -3019,6 +3019,34 @@ def _knockoff_plus_threshold(W: np.ndarray, q: float, offset: int = 1) -> float:
     return float(np.inf)
 
 
+def _knockoff_cond_block(X3: np.ndarray, cb: np.ndarray, centre_local: int, mult: float, Tw: int):
+    """Night-4 B2 conditional knockoff of one variable block (opt-in, gate "knockoff_cond").
+
+    X3 (R, Tw, N): stencil series. The block's columns cb are regressed (pooled over cells and times, with
+    intercept, predictors standardized) on all other columns, including the child's own block, by ridge with
+    the penalty chosen by generalized cross-validation (sklearn RidgeCV, alphas 1e-4..1e4, one alpha for the
+    block). Knockoff = fitted part + residual circularly shifted in time by s = ceil(mult x decorrelation time
+    of the residual at the block centre), capped at Tw // 2 (as the plain knockoff). Returns (knockoff (R, Tw,
+    |cb|), s). The fitted part keeps the block's covariance with the other blocks to first order, so a block
+    whose lag-1 information comes through the other blocks cannot beat its knockoff."""
+    from sklearn.linear_model import RidgeCV
+    R, T_, N = X3.shape
+    rest = np.setdiff1d(np.arange(N), cb)
+    Y = X3[:, :, cb].reshape(-1, cb.size)
+    if rest.size == 0:
+        fit = np.repeat(Y.mean(axis=0, keepdims=True), Y.shape[0], axis=0)
+    else:
+        P = X3[:, :, rest].reshape(-1, rest.size)
+        mu = P.mean(axis=0); sd = P.std(axis=0); sd[sd < 1e-12] = 1.0
+        Z = (P - mu) / sd
+        m = RidgeCV(alphas=np.logspace(-4, 4, 17), fit_intercept=True).fit(Z, Y)
+        fit = m.predict(Z).reshape(-1, cb.size)
+    res = (Y - fit).reshape(R, T_, cb.size)
+    s = int(np.ceil(float(mult) * _decorr_steps(res[:, :, int(centre_local)])))
+    s = int(min(max(s, 1), max(Tw // 2, 1)))
+    return fit.reshape(R, T_, cb.size) + np.roll(res, -s, axis=1), s
+
+
 def _variant_child_fit(
     reduced_space: np.ndarray, *, node_count: int, child_node: int, T: int, stencil_size: int,
     lambda_a: float, l1_ratio, dependence_threshold: float, fit_intercept: bool, max_iter: int,
@@ -3031,7 +3059,8 @@ def _variant_child_fit(
     thin: k            keep every k-th (t-1 -> t) pair in time (S).
     lambda_rule: "universal", lambda_c: c
                        standardized X, L1 weight = c * sigma * sqrt(2 log p / n_eff) (G-universal).
-    gate: "block_f" (gate_alpha), "pcmci_vars", "pcmci_links" (needs pc_graph), "knockoff" (fdr_q; fdr_offset 1 = knockoff+, 0 = knockoff),
+    gate: "block_f" (gate_alpha), "pcmci_vars", "pcmci_links" (needs pc_graph), "knockoff" (fdr_q; fdr_offset 1 = knockoff+, 0 = knockoff;
+          night 4: shift_mults, derand_min), "knockoff_cond" (night 4, same keys),
           "cv" (cv_folds)  -- act on the other variables' blocks only; the child's own block is kept.
     weight: "tstat"    link value = sign(w) |w / SE| (OLS on the EN support, effective n) (T);
             "tgate"    keep w, zero links with |t| <= t_min (default 2) (T').
@@ -3131,32 +3160,45 @@ def _variant_child_fit(
                  ridge_alpha=ridge_alpha, fit_intercept=fit_intercept, max_iter=max_iter,
                  dependence_threshold=dependence_threshold)
 
-    if gate == "knockoff":
+    if gate in ("knockoff", "knockoff_cond"):
         q = float(v.get("fdr_q", 0.1))
         other = np.where(allowed & (blk != own))[0]
         if other.size:
-            # knockoff copy of each other variable: circular time shift (within the window) of that
-            # variable's stencil block by s >= 2 x its decorrelation time (capped at Tw // 2)
-            Xk_parts = []
-            for b in np.unique(blk[other]):
-                cb = np.where(blk == b)[0]
-                centre = b * stencil_size + stencil_size // 2
-                s = int(np.ceil(2.0 * _decorr_steps(X3[:, :, centre])))
-                s = int(min(max(s, 1), max(Tw // 2, 1)))
-                sh = np.roll(X3[:, :, cb], -s, axis=1)
-                Xk_parts.append((cb, sh[:, :-1, :].reshape(-1, cb.size)[keep_rows]))
-            kcols = np.concatenate([cb for cb, _ in Xk_parts])
-            Xk = np.column_stack([xk for _, xk in Xk_parts])
-            Xaug = np.column_stack([X, Xk])
-            cols_aug = np.concatenate([np.where(allowed)[0], node_count + np.arange(kcols.size)])
-            w_aug, _ = _en_fit(Xaug, y, cols_aug, **fitkw)
-            # compare on the standardized scale so real and knockoff coefficients are comparable
-            sd_r = X[:, kcols].std(axis=0); sd_k = Xk.std(axis=0)
-            Wst = np.abs(w_aug[kcols]) * sd_r - np.abs(w_aug[node_count:]) * sd_k
-            mask_other = np.isin(kcols, other)
-            Wo = Wst[mask_other]; co = kcols[mask_other]
-            tau = _knockoff_plus_threshold(Wo, q, int(v.get("fdr_offset", 1)))
-            sel = co[Wo >= tau] if np.isfinite(tau) else np.array([], dtype=int)
+            # Night-4 (opt-in): shift_mults (default [2.0] = night-3 ko0_10) and derand_min (default 1):
+            # a column is kept if the knockoff filter selects it for >= derand_min of the shift multipliers (B3).
+            # gate "knockoff_cond" (B2): knockoff = ridge prediction of the block from all other blocks + the
+            # circularly shifted residual (see _knockoff_cond_block).
+            mults = [float(m) for m in v.get("shift_mults", [2.0])]
+            need = int(v.get("derand_min", 1))
+            votes = np.zeros(node_count, dtype=int)
+            for mult in mults:
+                Xk_parts = []
+                for b in np.unique(blk[other]):
+                    cb = np.where(blk == b)[0]
+                    if gate == "knockoff":
+                        # knockoff copy of each other variable: circular time shift (within the window) of that
+                        # variable's stencil block by s >= 2 x its decorrelation time (capped at Tw // 2)
+                        centre = b * stencil_size + stencil_size // 2
+                        s = int(np.ceil(mult * _decorr_steps(X3[:, :, centre])))
+                        s = int(min(max(s, 1), max(Tw // 2, 1)))
+                        sh = np.roll(X3[:, :, cb], -s, axis=1)
+                    else:
+                        sh, s = _knockoff_cond_block(X3, cb, stencil_size // 2, mult, Tw)
+                    Xk_parts.append((cb, sh[:, :-1, :].reshape(-1, cb.size)[keep_rows]))
+                kcols = np.concatenate([cb for cb, _ in Xk_parts])
+                Xk = np.column_stack([xk for _, xk in Xk_parts])
+                Xaug = np.column_stack([X, Xk])
+                cols_aug = np.concatenate([np.where(allowed)[0], node_count + np.arange(kcols.size)])
+                w_aug, _ = _en_fit(Xaug, y, cols_aug, **fitkw)
+                # compare on the standardized scale so real and knockoff coefficients are comparable
+                sd_r = X[:, kcols].std(axis=0); sd_k = Xk.std(axis=0)
+                Wst = np.abs(w_aug[kcols]) * sd_r - np.abs(w_aug[node_count:]) * sd_k
+                mask_other = np.isin(kcols, other)
+                Wo = Wst[mask_other]; co = kcols[mask_other]
+                tau = _knockoff_plus_threshold(Wo, q, int(v.get("fdr_offset", 1)))
+                sel_m = co[Wo >= tau] if np.isfinite(tau) else np.array([], dtype=int)
+                votes[sel_m] += 1
+            sel = other[votes[other] >= need]
             drop = np.setdiff1d(other, sel)
             allowed[drop] = False
             info["knockoff_kept"] = int(sel.size)
@@ -3217,6 +3259,21 @@ def _variant_child_fit(
             graph[j, child_node, 1] = "-->"
             val[j, child_node, 1] = w[j]
     return graph, val, info
+
+
+def _write_linkstats(d, graph, center_nodes, stencil_size):
+    """Night-4 C (opt-in, env TST_LINKSTATS=<dir>): for each fitted child, append one line
+    "<child block> <n blocks> <parent blocks with any lag-1 link, comma-separated, or ->" to <dir>/links_<pid>.txt.
+    Blocks are 0-based variable indices in the input order. Unset = nothing is written."""
+    import os as _os
+    nv = graph.shape[0] // stencil_size
+    lines = []
+    for c in center_nodes:
+        par = np.where(graph[:, c, 1] == "-->")[0]
+        pb = sorted(set((par // stencil_size).tolist()))
+        lines.append(f"{c // stencil_size} {nv} {','.join(map(str, pb)) if pb else '-'}\n")
+    with open(_os.path.join(d, f"links_{_os.getpid()}.txt"), "a") as f:
+        f.writelines(lines)
 
 
 def mv_CaStLe_GRANGER(
@@ -3343,6 +3400,11 @@ def mv_CaStLe_GRANGER(
         graph = graph.copy()
         val[mask] = 0.0
         graph[mask] = ""
+
+    import os as _os_ls
+    _ls = _os_ls.environ.get("TST_LINKSTATS")   # night-4 C (opt-in): variable-level selection log
+    if _ls:
+        _write_linkstats(_ls, graph, center_nodes, stencil_size)
 
     results = dict(
         graph=graph,
