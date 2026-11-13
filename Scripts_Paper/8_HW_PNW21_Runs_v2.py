@@ -75,6 +75,8 @@ VAR_NAME_MAP = {
     "z10": "Z10",
 }
 
+EXTRA_NAME_MAP = {"t2m": "T2M", "tcc": "TCC"}   # night-4 A2 decoys (--extra-vars)
+
 VAR_COMBOS: List[List[str]] = [
     ["z500", "z10", "olr", "tcwv", "slhf", "sshf"],
 ]
@@ -141,7 +143,7 @@ def load_placebo_vars(varstems: List[str], year: int, shift_days: int = 0, shift
 
 def build_case_pnw(var_combo: List[str] | None = None, placebo_vars=None, placebo_year=2010,
                    placebo_shift_days: int = 0, placebo_shift_lon: float = 0.0,
-                   placebo_mode: str = "add") -> dict:
+                   placebo_mode: str = "add", extra_vars=None, extra_path=None) -> dict:
     if var_combo is None:
         var_combo = VAR_COMBOS[0]
 
@@ -161,6 +163,15 @@ def build_case_pnw(var_combo: List[str] | None = None, placebo_vars=None, placeb
             full_data = xr.concat([full_data, plc.transpose(*full_data.dims)], dim="var", join="inner")
         else:
             raise ValueError(f"placebo_mode must be 'add' or 'replace', got {placebo_mode!r}")
+    if extra_vars:
+        # night-4 A2 (opt-in; default None = original): decoy fields <extra_path>/<stem>_daily_anoms.nc, built
+        # with the paper recipe (data_processing/era5_pnw/make_pnw_extra_anoms.py), same window, appended last
+        if not extra_path:
+            raise ValueError("extra_vars needs extra_path")
+        ex = tst.data_io.load_full_data(path_files=str(extra_path), varstems=list(extra_vars),
+                                        list_names_vars=[EXTRA_NAME_MAP.get(s, s.upper()) for s in extra_vars],
+                                        time_slice=TIME_SLICE, join="inner")
+        full_data = xr.concat([full_data, ex.transpose(*full_data.dims)], dim="var", join="inner")
     full_data = regrid_to_2p5(full_data)
 
     params_base = dict(
@@ -1041,6 +1052,9 @@ def parse_args():
                         help="N2: add the placebo (original) or replace the original variable by it")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
                         help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
+    parser.add_argument("--extra-vars", type=str, nargs="+", default=None,
+                        help="night-4 A2: extra decoy variables (stems; files <extra-path>/<stem>_daily_anoms.nc)")
+    parser.add_argument("--extra-path", type=str, default=None, help="night-4 A2: directory of the --extra-vars files")
     parser.add_argument("--run-ids", type=int, nargs="+", default=None,
                         help="Run only these run ids (configs still drawn for all --n-trials)")
     parser.add_argument(
@@ -1057,7 +1071,8 @@ def main():
     print("Loading PNW21 data...", flush=True)
     case = build_case_pnw(placebo_vars=args.placebo_vars, placebo_year=args.placebo_year,
                           placebo_shift_days=args.placebo_shift_days, placebo_shift_lon=args.placebo_shift_lon,
-                          placebo_mode=args.placebo_mode)
+                          placebo_mode=args.placebo_mode,
+                          **({} if not args.extra_vars else dict(extra_vars=args.extra_vars, extra_path=args.extra_path)))
     full_data_run = case["full_data"]
 
     print(full_data_run, flush=True)
