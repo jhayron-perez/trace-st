@@ -1508,7 +1508,7 @@ def night2_case_kwargs(args):
         kw["moving_offset"] = float(args.moving_offset)
     if args.moving_tc_lag != 2.0:
         kw["moving_tc_lag"] = float(args.moving_tc_lag)
-    if args.decoy_driver != "parent":
+    if getattr(args, "decoy_driver", "parent") != "parent":   # older callers build Namespaces without it
         kw["decoy_driver"] = args.decoy_driver
     return kw
 
