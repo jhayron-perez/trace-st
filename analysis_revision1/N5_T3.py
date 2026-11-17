@@ -170,12 +170,12 @@ def figure(Sm, Lk):
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch
     S.set_style()
-    fig, axs = plt.subplots(2, 2, figsize=(S.DOUBLE, 0.72 * S.DOUBLE))
+    fig, axs = plt.subplots(2, 2, figsize=(S.DOUBLE, 0.82 * S.DOUBLE))
     (ax_a, ax_b), (ax_c, ax_d) = axs
     # (a) schematic
-    ax_a.set_xlim(0, 10); ax_a.set_ylim(0, 10); ax_a.axis("off")
-    box = dict(A=(1.4, 8.0), C=(1.4, 4.4), B=(5.0, 6.2), R=(8.6, 6.2), L=(5.0, 9.3), Q=(5.0, 3.0), N=(8.6, 9.3), M=(8.6, 3.0))
-    txt = dict(A="A", C="C", B="B (target)", R="Response\nR ← B", L="Delayed\nL ← A,C (lag 2)", Q="Nonlinear\nQ ← max(A − ½, 0)",
+    ax_a.set_xlim(0, 10); ax_a.set_ylim(0, 9.6); ax_a.axis("off")
+    box = dict(A=(1.4, 7.0), C=(1.4, 3.8), B=(5.0, 5.4), R=(8.6, 5.4), L=(5.0, 8.2), Q=(5.0, 2.4), N=(8.6, 8.2), M=(8.6, 2.4))
+    txt = dict(A="A", C="C", B="B (target)", R="Response\nR ← B", L="Delayed: L ← A or C\nat lag 2", Q="Nonlinear: Q ←\nmax(A or C − ½, 0)",
                N="Noise N", M="Moving\nblob M")
     cl = dict(A="true", C="true", B="true", R="response", L="delayed", Q="nonlinear", N="noise", M="moving")
     for k, (xx, yy) in box.items():
@@ -185,11 +185,11 @@ def figure(Sm, Lk):
 
     def arrow(a, b, c, ls="-"):
         ax_a.annotate("", xy=box[b], xytext=box[a], arrowprops=dict(arrowstyle="-|>", color=c, lw=1.0, ls=ls,
-                      shrinkA=13, shrinkB=13))
+                      shrinkA=16, shrinkB=30))
     arrow("A", "B", S.CLASS_COLORS["true"]); arrow("C", "B", S.CLASS_COLORS["true"])
     arrow("B", "R", S.CLASS_COLORS["response"], "--"); arrow("A", "L", S.CLASS_COLORS["delayed"], "--")
     arrow("C", "Q", S.CLASS_COLORS["nonlinear"], "--")
-    ax_a.text(5.0, 0.6, "solid: causal for B (lag 1); dashed: decoy driven by a true variable, not a parent of B",
+    ax_a.text(5.0, 0.4, "solid: causal for B (lag 1); dashed: decoy driven by A, C or B, not a parent of B",
               ha="center", fontsize=5.2)
     # (b) stacked shares vs p (pooled alphas), CI on the true-parent share
     s = Sm[Sm["alpha"] == "pooled"].sort_values("p")
@@ -206,7 +206,7 @@ def figure(Sm, Lk):
         bottom += y
     ax_b.set_xticks(xs); ax_b.set_xticklabels(s["p"].astype(int)); ax_b.set_xlabel("Number of variables p")
     ax_b.set_ylabel("Share of trajectory density"); ax_b.set_ylim(0, 1.0)
-    ax_b.legend(loc="lower left", fontsize=5.2, ncol=2)
+    ax_b.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), fontsize=5.2, ncol=3, columnspacing=0.8)
     # (c) alpha error vs p, per alpha
     for a, mk in ((0.2, "o"), (0.6, "s")):
         q = Sm[Sm["alpha"] == a].sort_values("p")
@@ -227,9 +227,9 @@ def figure(Sm, Lk):
                     ax_d.scatter(r[f"sel_{k}"], srow[f"share_{k}"] / nvar, s=14, marker=mks[int(r["p"])],
                                  color=S.CLASS_COLORS[k], edgecolor="k", lw=0.3)
         from matplotlib.lines import Line2D
-        h = [Line2D([], [], ls="", marker="o", color=S.CLASS_COLORS[k], label=S.CLASS_LABELS[k]) for k in
+        h = [Line2D([], [], ls="", marker="o", ms=4, color=S.CLASS_COLORS[k], label=S.CLASS_LABELS[k]) for k in
              ["true", "noise", "response", "moving", "delayed", "nonlinear"]]
-        h += [Line2D([], [], ls="", marker=m, color="0.5", label=f"p = {p}") for p, m in mks.items()]
+        h += [Line2D([], [], ls="", marker=m, ms=4, color="0.5", label=f"p = {p}") for p, m in mks.items()]
         ax_d.legend(handles=h, loc="upper left", fontsize=5, ncol=2)
     ax_d.set_xlabel("Link-level selection rate (per variable)"); ax_d.set_ylabel("Density share per variable")
     ax_d.set_xlim(-0.02, 1.02); ax_d.set_ylim(0, None)

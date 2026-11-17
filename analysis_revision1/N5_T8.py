@@ -82,6 +82,9 @@ def main():
     p03 = R1 / "night5" / "t3" / "p03"
     if (p03 / "results_alphas_final.csv").exists() or (p03 / "results_alphas_snapshot.csv").exists():
         rows += [dict(r, strength="own (night-5 p03, linear)") for r in t2_cells(p03, "granger", "own")]
+    rf = R1 / "night5" / "t8" / "T2en_refit_linear"
+    if (rf / "results_alphas_final.csv").exists():
+        rows += [dict(r, strength="refit (night-5, linear, same settings as p03)") for r in t2_cells(rf, "granger", "refit")]
     rows += t2_cells(R1 / "T2r_multivariate_pcmci", "pcmci", "own")
     rows += t2_cells(R1 / "T9_refit" / "T2_pcmci_refit", "pcmci", "refit")
     for mode in ("own", "refit"):
