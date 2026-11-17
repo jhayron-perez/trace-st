@@ -52,6 +52,7 @@ CASES = {
                            Z10="competitor", T2M="child", BLH="child"), title="PNW heat wave 2021"),
 }
 ROLE_ORDER = ["parent", "intermediate", "candidate", "competitor", "child"]
+SHORT_ROLE = dict(parent="Parent", intermediate="Interm.", candidate="Candidate", competitor="Compet.", child="Child")
 
 
 def run_dirs(rel):
@@ -242,7 +243,7 @@ def fig_case(case, L, W, cfg):
     axc.set_title("Bar colours = variables as in a, b; hatched = original set", fontsize=6)
     from matplotlib.patches import Patch
     axc.legend([Patch(facecolor="0.6", hatch="////", edgecolor="white"), Patch(facecolor="0.6")],
-               ["original set", "extended set"], loc="upper right", ncol=2)
+               ["original set", "extended set"], loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
     # d: role-summed shares by window (extended set) with CI
     K = _K[(_K["case"] == case) & (_K["set"] == "ext") & (_K["cfgset"] == "paired") & _K["window"].isin(wins)]
     rl = [r for r in ROLE_ORDER if (K["role"] == r).any()]
@@ -277,7 +278,7 @@ def fig_summary(K):
                     y = float(q["share"].iloc[0])
                     ax.bar(j + dx, y, 0.38, color=S.ROLE_COLORS[r], hatch=hatch, edgecolor="white" if hatch else S.ROLE_COLORS[r], lw=0.3)
                     ax.errorbar(j + dx, y, yerr=[[y - float(q["lo"].iloc[0])], [float(q["hi"].iloc[0]) - y]], color="k", lw=0.6, capsize=1)
-        ax.set_xticks(range(len(rl))); ax.set_xticklabels([S.ROLE_LABELS[r].replace(" / ", "/\n").replace(" ", "\n") for r in rl])
+        ax.set_xticks(range(len(rl))); ax.set_xticklabels([SHORT_ROLE[r] for r in rl], fontsize=6)
         ax.set_ylim(0, 1); ax.set_title(f"{CASES[case]['title']}, {HEADLINE[case][1:].replace('-', '–')} d", loc="left")
     axs[0].set_ylabel("Summed share of trajectory density")
     from matplotlib.patches import Patch
