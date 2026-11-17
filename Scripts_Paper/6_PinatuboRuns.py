@@ -165,8 +165,10 @@ def load_pinatubo_data(
         da = xr.open_dataset(f"{path_files_pinatubo}/{var}_199101_199112.nc")[var]
         vars_list.append(da)
     if extra_vars:
+        # night-5 T6 (opt-in): --extra-path sets TST_PINATUBO_EXTRA_PATH; unset = original data dir
+        extra_dir = os.environ.get("TST_PINATUBO_EXTRA_PATH") or PATH_FILES_E3SM_EXTRA
         for var in extra_vars:
-            da = xr.open_dataset(f"{PATH_FILES_E3SM_EXTRA}/{var}_199101_199112.nc")[var]
+            da = xr.open_dataset(f"{extra_dir}/{var}_199101_199112.nc")[var]
             vars_list.append(da)
         var_names = list(var_names) + list(extra_vars)
 
@@ -1194,6 +1196,8 @@ def parse_args():
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     parser.add_argument("--trial-ids", type=int, nargs="+", default=None,
                         help="night 5 (opt-in): run only these trial ids (configs still drawn for all --n-trials)")
+    parser.add_argument("--extra-path", type=str, default=None,
+                        help="night 5 T6 (opt-in): directory of the --extra-vars files (default: PATH_FILES_E3SM_EXTRA)")
     return parser.parse_args()
 
 
@@ -1217,6 +1221,8 @@ def main():
 
     if args.extra_vars:
         os.environ["TST_PINATUBO_EXTRA"] = ",".join(args.extra_vars)
+    if args.extra_path:
+        os.environ["TST_PINATUBO_EXTRA_PATH"] = str(args.extra_path)
     all_jobs = build_pinatubo_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
@@ -1233,6 +1239,7 @@ def main():
         "case_name": "pinatubo",
         "seed": int(args.seed),
         **({"extra_vars": list(args.extra_vars)} if args.extra_vars else {}),
+        **({"extra_path": str(args.extra_path)} if args.extra_path else {}),
         "n_trials": int(args.n_trials),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),
