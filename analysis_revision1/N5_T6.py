@@ -164,7 +164,7 @@ def figure(case, DEG, NUL, real):
     S.set_style()
     head = dict(debby="w5-15", pinatubo="w4-16", pnw="w1-10")[case]
     wins = [f"w{a}-{b}" for a, b in WINDOWS[case]]
-    fig, axs = plt.subplots(1, 4, figsize=(S.DOUBLE, 0.3 * S.DOUBLE), gridspec_kw=dict(width_ratios=[1.1, 0.8, 0.8, 1.5]))
+    fig, axs = plt.subplots(1, 4, figsize=(S.DOUBLE, 0.4 * S.DOUBLE), gridspec_kw=dict(width_ratios=[1.1, 0.8, 0.8, 1.5]))
     d = DEG[(DEG["window"] == head)]
     Ks = sorted(d["K"].unique())
     for v in real:
@@ -172,14 +172,14 @@ def figure(case, DEG, NUL, real):
         axs[0].errorbar(g["K"], g["share_renorm"], yerr=[g["share_renorm"] - g["lo_renorm"], g["hi_renorm"] - g["share_renorm"]],
                         color=S.col(v), marker="o", ms=2.5, lw=1, capsize=1, label=S.lab(v))
     axs[0].set_xlabel("Surrogates added, K"); axs[0].set_ylabel("Share among real variables")
-    axs[0].set_xticks(Ks); axs[0].legend(fontsize=5, ncol=2, loc="upper right")
+    axs[0].set_xticks(Ks); axs[0].legend(fontsize=5, ncol=4, loc="upper left", bbox_to_anchor=(0.0, -0.28), columnspacing=0.6, handlelength=1.2)
     g = d[d["var"] == "surrogates_total"].sort_values("K")
     axs[1].errorbar(g["K"], g["share"], yerr=[g["share"] - g["lo"], g["hi"] - g["share"]], color=S.ROLE_COLORS["surrogate"],
                     marker="o", ms=2.5, lw=1, capsize=1)
     axs[1].set_xlabel("K"); axs[1].set_ylabel("Total surrogate share"); axs[1].set_xticks(Ks); axs[1].set_ylim(0, None)
     axs[2].plot(g["K"], g["frac_rank1"], "o-", color="k", ms=2.5)
     axs[2].set_xlabel("K"); axs[2].set_ylabel("Same top variable as K = 0"); axs[2].set_ylim(0, 1.02); axs[2].set_xticks(Ks)
-    nw = NUL[(NUL["K"].astype(str) == "pooled")]
+    nw = NUL[(NUL["K"].astype(str) == "16")]
     ax = axs[3]
     xw = {"pnw": "w11-30"}.get(case, head)
     for k, wl in enumerate([head] + ([xw] if xw != head else [])):
@@ -195,10 +195,11 @@ def figure(case, DEG, NUL, real):
             ax.plot(x, r["real_share"], "o" if k == 0 else "s", color=S.col(v), ms=3.5,
                     mec="k" if r["above_null"] else S.col(v), mew=0.6)
     ax.set_xticks(range(len(real))); ax.set_xticklabels([S.lab(v) for v in real], rotation=60, ha="right", fontsize=5.5)
-    ax.set_ylabel("Share (real: dot; null: 2.5–97.5 %)")
-    ttl = f"{head[1:].replace('-', '–')} d" + (f" (circles), {xw[1:].replace('-', '–')} d (squares)" if xw != head else "")
-    ax.set_title(ttl, fontsize=6)
-    S.panel_labels(axs, x=-0.25)
+    ax.set_ylabel("Share of density (K = 16)")
+    ttl = ("markers: real (black edge = above null p95, tick)\nbars: null 2.5–97.5 %"
+           + (f"\n{head[1:].replace('-', '–')} d circles, {xw[1:].replace('-', '–')} d squares" if xw != head else ""))
+    ax.set_title(ttl, fontsize=5.2)
+    S.panel_labels(axs, x=-0.32, y=1.06)
     fig.suptitle(f"{CASES[case]['title']}: surrogate sweep", x=0.02, ha="left", fontsize=8, fontweight="bold")
     fig.tight_layout()
     print("fig", S.save(fig, "surrogates", f"{case}_surrogate_sweep"))
