@@ -160,5 +160,37 @@ class TestForceProbRuleCLI(unittest.TestCase):
                              {k: v for k, v in y.items() if k not in ("prob_rule", "beta_softmax")})
 
 
+# ---------------------------------------------------------------- T5 adaptive group lasso (variant {"fit": "agl"})
+class TestAGL(unittest.TestCase):
+    def setUp(self):
+        from trace_st import castle_core as mc
+        from tests.test_night4 import toy_data, KW, parent_vars
+        self.mc, self.toy, self.KW, self.parent_vars = mc, toy_data, KW, parent_vars
+
+    def test_zero_lambda_is_ols(self):
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((400, 6)); y = X @ np.array([1.0, -0.5, 0, 0, 0.3, 0]) + 0.1 * rng.standard_normal(400)
+        w, b0 = self.mc._agl_fit(X, y, np.arange(6), np.repeat([0, 1, 2], 2), lam=0.0, fit_intercept=True, max_iter=20000, tol=1e-12)
+        A = np.column_stack([np.ones(400), X]); ref = np.linalg.lstsq(A, y, rcond=None)[0]
+        np.testing.assert_allclose(w, ref[1:], atol=1e-5); self.assertAlmostEqual(b0, ref[0], places=5)
+
+    def test_group_sparsity(self):
+        rng = np.random.default_rng(1)
+        X = rng.standard_normal((500, 6)); y = X[:, 0] + X[:, 1] + 0.2 * rng.standard_normal(500)
+        w, _ = self.mc._agl_fit(X, y, np.arange(6), np.repeat([0, 1, 2], 2), lam=0.05)
+        self.assertTrue(np.all(np.abs(w[:2]) > 0.5)); self.assertTrue(np.all(w[2:] == 0.0))
+
+    def test_toy_selects_true_parent(self):
+        d = self.toy(seed=0)
+        r = self.mc.mv_CaStLe_GRANGER(d, variant={"fit": "agl"}, **self.KW)
+        self.assertIn(1, self.parent_vars(r)); self.assertNotIn(2, self.parent_vars(r))
+
+    def test_other_variants_unchanged(self):
+        d = self.toy(seed=2)
+        a = self.mc.mv_CaStLe_GRANGER(d, variant={"thin": 1}, **self.KW)
+        b = self.mc.mv_CaStLe_GRANGER(d, variant={"thin": 1, "fit": "en"}, **self.KW)
+        self.assertEqual(a["val_matrix"].tobytes(), b["val_matrix"].tobytes())
+
+
 if __name__ == "__main__":
     unittest.main()

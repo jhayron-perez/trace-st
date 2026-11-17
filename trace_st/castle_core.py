@@ -2976,6 +2976,54 @@ def _ols_rss(X: np.ndarray, y: np.ndarray, cols: np.ndarray):
     return float(r @ r), int(rank), r
 
 
+def _agl_fit(X, y, cols, blk, *, lam, gamma=1.0, ridge_init=1e-2, fit_intercept=False, max_iter=3000, tol=1e-7):
+    """Night-5 T5 (opt-in, variant {"fit": "agl"}): adaptive group lasso on columns `cols`.
+
+    Groups = variable blocks `blk` (the stencil block of each parent variable). On standardized columns Z:
+        min_b (1/2n) ||y - y0 - Z b||^2 + lam * sum_g a_g sqrt(p_g) ||b_g||_2,
+    adaptive weights a_g = (||b_init,g|| / mean_g ||b_init,g||)^(-gamma) from a ridge initial fit (penalty
+    ridge_init, standardized), so the weights have mean ~1 and lam keeps the scale of the drawn lambda_a.
+    Solved by FISTA with group soft-thresholding (step 1/L, L = largest eigenvalue of Z'Z/n).
+    Returns (w full length, intercept) in original X units, as _en_fit.
+    """
+    N = X.shape[1]
+    w_full = np.zeros(N)
+    if cols.size == 0:
+        return w_full, float(y.mean())
+    Xs = X[:, cols]; n = Xs.shape[0]
+    mu = Xs.mean(axis=0) if fit_intercept else np.zeros(cols.size)
+    sd = Xs.std(axis=0); sd[sd < 1e-12] = 1.0
+    Z = (Xs - mu) / sd
+    y0 = float(y.mean()) if fit_intercept else 0.0
+    yc = y - y0
+    g_of = np.asarray(blk)[cols]
+    groups = [np.where(g_of == g)[0] for g in np.unique(g_of)]
+    G = Z.T @ Z / n
+    b_init = np.linalg.solve(G + float(ridge_init) * np.eye(cols.size), Z.T @ yc / n)
+    nrm = np.array([np.linalg.norm(b_init[ix]) for ix in groups])
+    a = (np.maximum(nrm, 1e-12) / max(float(nrm.mean()), 1e-12)) ** (-float(gamma))
+    thr = float(lam) * a * np.sqrt([len(ix) for ix in groups])
+    L = float(np.linalg.eigvalsh(G)[-1]) if cols.size else 1.0
+    step = 1.0 / max(L, 1e-12)
+    Zty = Z.T @ yc / n
+    b = np.zeros(cols.size); zk = b.copy(); tk = 1.0
+    for _ in range(int(max_iter)):
+        u = zk - step * (G @ zk - Zty)
+        bn = np.zeros_like(u)
+        for ix, th in zip(groups, thr):
+            nu = np.linalg.norm(u[ix])
+            if nu > step * th:
+                bn[ix] = (1.0 - step * th / nu) * u[ix]
+        tn = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * tk * tk))
+        zk = bn + ((tk - 1.0) / tn) * (bn - b)
+        if np.max(np.abs(bn - b)) <= tol * max(1.0, float(np.max(np.abs(b)))):
+            b = bn; break
+        b, tk = bn, tn
+    w = b / sd
+    w_full[cols] = w
+    return w_full, y0 - float((w * mu).sum())
+
+
 def _en_fit(X, y, cols, *, alpha, l1_ratio, standardize, refit_ridge, ridge_alpha,
             fit_intercept, max_iter, dependence_threshold):
     """Same steps as _lasso_single_child_lag1 on columns `cols` only.
@@ -3231,7 +3279,13 @@ def _variant_child_fit(
                 allowed[blk == b] = False
 
     cols = np.where(allowed)[0]
-    w, b0 = _en_fit(X, y, cols, **fitkw)
+    if v.get("fit") == "agl":   # night-5 T5 (opt-in): adaptive group lasso, groups = variable blocks
+        w, b0 = _agl_fit(X, y, cols, blk, lam=alpha_eff, gamma=float(v.get("agl_gamma", 1.0)),
+                         ridge_init=float(v.get("agl_ridge", 1e-2)), fit_intercept=fit_intercept,
+                         max_iter=int(v.get("agl_max_iter", 3000)), tol=float(v.get("agl_tol", 1e-7)))
+        info["agl_groups_kept"] = int(np.unique(blk[np.abs(w) > 0]).size)
+    else:
+        w, b0 = _en_fit(X, y, cols, **fitkw)
     sup = np.where(np.abs(w) >= float(dependence_threshold))[0]
 
     wt = v.get("weight")
