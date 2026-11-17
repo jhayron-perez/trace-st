@@ -74,6 +74,8 @@ def main():
     ap.add_argument("--case", required=True, choices=list(CASES))
     ap.add_argument("--partial", action="store_true")
     ap.add_argument("--nproc", type=int, default=32)
+    ap.add_argument("--configs", type=int, nargs="+", default=None,
+                    help="restrict to these configs (same set at every K); outputs get suffix _cfg<n>")
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     case = a.case
@@ -108,7 +110,11 @@ def main():
     if not rows:
         print("no runs"); return
     X = pd.DataFrame(rows)
-    X.to_csv(OUT / f"T6_{case}_long.csv.gz", index=False)
+    tag = ""
+    if a.configs:
+        X = X[X["cfg"].isin(a.configs)].copy(); tag = f"_cfg{len(a.configs)}"
+        print("configs restricted to", a.configs, "rows", len(X))
+    X.to_csv(OUT / f"T6_{case}{tag}_long.csv.gz", index=False)
     # --- degradation
     base_top = {}
     for _, r in X[X["K"] == 0].iterrows():
@@ -126,7 +132,7 @@ def main():
         m, lo, hi = boot_ci(g["sur_total"].to_numpy())
         deg.append(dict(case=case, K=K, window=w, var="surrogates_total", n=len(g), share=m, lo=lo, hi=hi,
                         frac_rank1=float(np.mean(same)) if base_top else np.nan))
-    DEG = pd.DataFrame(deg); DEG.to_csv(OUT / f"T6_{case}_degradation.csv", index=False)
+    DEG = pd.DataFrame(deg); DEG.to_csv(OUT / f"T6_{case}{tag}_degradation.csv", index=False)
     # --- null per type
     nul = []
     scol = [c for c in X.columns if c.startswith("sur:")]
@@ -146,7 +152,7 @@ def main():
                 nul.append(dict(case=case, K=Ksel, window=w, var=v, n_null=len(vals), null_p025=p[0], null_p50=p[1],
                                 null_p95=p[2], null_p975=p[3], real_share=rs, above_null=bool(rs > p[2]),
                                 frac_cfg_draw_above_p95=float((g[v] > p[2]).mean())))
-    NUL = pd.DataFrame(nul); NUL.to_csv(OUT / f"T6_{case}_null.csv", index=False)
+    NUL = pd.DataFrame(nul); NUL.to_csv(OUT / f"T6_{case}{tag}_null.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_rows", 500):
         print(DEG.pivot_table(index=["window", "var"], columns="K", values="share").round(3).to_string())
         print(DEG[DEG["var"] == "surrogates_total"][["window", "K", "share", "frac_rank1"]].round(3).to_string())
@@ -156,10 +162,10 @@ def main():
         stm = {r["var"]: dict(real=r["real_share"], null_p95=r["null_p95"], above=r["above_null"]) for _, r in q.iterrows()}
         json.dump(stm, open(OUT / "T6_pnw_11_30_statement.json", "w"), indent=1, default=float)
         print("PNW 11-30 d:", stm)
-    figure(case, DEG, NUL, real)
+    figure(case, DEG, NUL, real, tag)
 
 
-def figure(case, DEG, NUL, real):
+def figure(case, DEG, NUL, real, tag=""):
     import matplotlib.pyplot as plt
     S.set_style()
     head = dict(debby="w5-15", pinatubo="w4-16", pnw="w1-10")[case]
@@ -202,7 +208,7 @@ def figure(case, DEG, NUL, real):
     S.panel_labels(axs, x=-0.32, y=1.06)
     fig.suptitle(f"{CASES[case]['title']}: surrogate sweep", x=0.02, ha="left", fontsize=8, fontweight="bold")
     fig.tight_layout()
-    print("fig", S.save(fig, "surrogates", f"{case}_surrogate_sweep"))
+    print("fig", S.save(fig, "surrogates", f"{case}_surrogate_sweep{tag}"))
 
 
 if __name__ == "__main__":
