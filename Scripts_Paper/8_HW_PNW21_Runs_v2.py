@@ -1057,6 +1057,9 @@ def parse_args():
     parser.add_argument("--extra-path", type=str, default=None, help="night-4 A2: directory of the --extra-vars files")
     parser.add_argument("--run-ids", type=int, nargs="+", default=None,
                         help="Run only these run ids (configs still drawn for all --n-trials)")
+    parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
+                        help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged; "
+                             "linear also sets beta_softmax 0, as sample_pnw_trial does)")
     parser.add_argument(
         "--continue-if-exists",
         action="store_true",
@@ -1085,6 +1088,11 @@ def main():
         use_wide_search_space()
     jobs = build_pnw_jobs(n_trials=args.n_trials, seed=args.seed)
     param_samples = [trial for _, trial in jobs]
+    if args.force_prob_rule:
+        for t in param_samples:
+            t["prob_rule"] = args.force_prob_rule
+            if args.force_prob_rule == "linear":
+                t["beta_softmax"] = 0.0
     if args.run_ids is not None:
         param_samples = [t for t in param_samples if int(t["run_id"]) in set(args.run_ids)]
 

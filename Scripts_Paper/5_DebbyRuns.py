@@ -1236,6 +1236,8 @@ def parse_args():
                         help="Replace the vorticity field: PATH:VARNAME (default: FilesDebby/Vo_anomalies_TC_500-700.nc4)")
     parser.add_argument("--trial-ids", type=int, nargs="+", default=None,
                         help="Run only these trial ids (configs still drawn for all --n-trials)")
+    parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
+                        help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     return parser.parse_args()
 
 
@@ -1260,6 +1262,9 @@ def main():
     all_jobs = build_debby_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
+    if args.force_prob_rule:
+        for _, trial in all_jobs:
+            trial["prob_rule"] = args.force_prob_rule
     extra_inputs = None
     if args.extra_inputs:
         extra_inputs = []

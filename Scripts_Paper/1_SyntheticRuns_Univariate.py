@@ -898,6 +898,8 @@ def parse_args():
                         help="revision-1 G: source before the origin: hold at the origin or absent")
     parser.add_argument("--trial-ids", type=str, default=None,
                         help="Run only these trial ids: comma list '0,5,7' or '@FILE' (one id per line)")
+    parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
+                        help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     return parser.parse_args()
 
 
@@ -937,6 +939,8 @@ def main():
     summary_path = outdir / "run_summary.json"
 
     all_jobs = build_jobs(n_per_method=args.trials_per_method, seed=args.seed)
+    if args.force_prob_rule:   # night 5 (opt-in): draws unchanged
+        all_jobs = [(m, i, {**t, "prob_rule": args.force_prob_rule}) for m, i, t in all_jobs]
     trial_ids = parse_trial_ids(args.trial_ids)
     n_pre = n_pre_days_for(args.n_steps, args.record_length)
     if args.methods is not None or args.n_configs is not None or trial_ids is not None:

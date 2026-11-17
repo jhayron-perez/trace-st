@@ -1190,6 +1190,10 @@ def parse_args():
     parser.add_argument("--flush-every", type=int, default=10, help="Write snapshot every N completed trials")
     parser.add_argument("--extra-vars", type=str, nargs="+", default=None,
                         help="night-2 A3: extra E3SM fields appended after the paper variables (e.g. TMSO203 BURDENSO403 FLUT)")
+    parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
+                        help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
+    parser.add_argument("--trial-ids", type=int, nargs="+", default=None,
+                        help="night 5 (opt-in): run only these trial ids (configs still drawn for all --n-trials)")
     return parser.parse_args()
 
 
@@ -1214,6 +1218,11 @@ def main():
     if args.extra_vars:
         os.environ["TST_PINATUBO_EXTRA"] = ",".join(args.extra_vars)
     all_jobs = build_pinatubo_jobs(n_trials=args.n_trials, seed=args.seed)
+    if args.trial_ids is not None:
+        all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
+    if args.force_prob_rule:
+        for _, trial in all_jobs:
+            trial["prob_rule"] = args.force_prob_rule
 
     completed_ids, existing_job_rows = load_completed_trial_ids(jobs_jsonl)
     pending_jobs = filter_pending_trials(all_jobs, completed_ids)
