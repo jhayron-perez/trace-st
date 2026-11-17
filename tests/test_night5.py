@@ -130,6 +130,20 @@ class TestGeneratorNight5(unittest.TestCase):
                              {k: v for k, v in t2.items() if k != "prob_rule"})
 
 
+class TestSetParam(unittest.TestCase):
+    def test_parse_and_override(self):
+        for name in ("1_SyntheticRuns_Univariate.py", "3_SyntheticRuns_Multivariate.py"):
+            m = load_script(name)
+            self.assertEqual(m._parse_set_param(["radius=3", "box_size=27.3", "timewindow=2d"]),
+                             {"radius": 3, "box_size": 27.3, "timewindow": "2d"})
+            old = sys.argv
+            try:
+                sys.argv = [name, "--outdir", "/tmp/x"]
+                self.assertIsNone(m.parse_args().set_param, name)
+            finally:
+                sys.argv = old
+
+
 class TestForceProbRuleCLI(unittest.TestCase):
     """The flag exists, defaults to None (= original path) in every run script."""
 

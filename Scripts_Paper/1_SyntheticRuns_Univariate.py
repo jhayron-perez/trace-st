@@ -872,6 +872,21 @@ def evaluate_job(job, strength_mode="native", grouping="dbscan", n_steps=30, n_p
 # -----------------------------------------------------------------------------
 # Command-line orchestration and multiprocessing
 # -----------------------------------------------------------------------------
+def _parse_set_param(items):
+    """Night 5: ["radius=3", "box_size=30", "timewindow=2d"] -> {"radius": 3, "box_size": 30.0, "timewindow": "2d"}."""
+    out = {}
+    for s in items:
+        k, v = s.split("=", 1)
+        try:
+            out[k] = int(v)
+        except ValueError:
+            try:
+                out[k] = float(v)
+            except ValueError:
+                out[k] = v
+    return out
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Trace-ST synthetic hyperparameter search")
     parser.add_argument("--outdir", type=str, required=True, help="Output directory")
@@ -900,6 +915,8 @@ def parse_args():
                         help="Run only these trial ids: comma list '0,5,7' or '@FILE' (one id per line)")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
+    parser.add_argument("--set-param", type=str, nargs="+", default=None,
+                        help="night-5 T4 (opt-in): KEY=VALUE overrides applied to every drawn config after the draws")
     return parser.parse_args()
 
 
@@ -941,6 +958,9 @@ def main():
     all_jobs = build_jobs(n_per_method=args.trials_per_method, seed=args.seed)
     if args.force_prob_rule:   # night 5 (opt-in): draws unchanged
         all_jobs = [(m, i, {**t, "prob_rule": args.force_prob_rule}) for m, i, t in all_jobs]
+    if args.set_param:   # night-5 T4 out-of-sample check (opt-in): fixed values after the draws
+        sp = _parse_set_param(args.set_param)
+        all_jobs = [(m, i, {**t, **sp}) for m, i, t in all_jobs]
     trial_ids = parse_trial_ids(args.trial_ids)
     n_pre = n_pre_days_for(args.n_steps, args.record_length)
     if args.methods is not None or args.n_configs is not None or trial_ids is not None:

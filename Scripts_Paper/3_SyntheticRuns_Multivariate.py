@@ -1588,6 +1588,8 @@ def parse_args():
                         help="night-5 T3: extra variables of these types, in this order (see _build_extra_vars)")
     parser.add_argument("--mix-beta", type=str, nargs="+", default=None,
                         help="night-5 T3: per-type beta for --extra-mix decoys, e.g. delayed=0.2 (default: --decoy-beta)")
+    parser.add_argument("--set-param", type=str, nargs="+", default=None,
+                        help="night-5 T4 (opt-in): KEY=VALUE overrides applied to every drawn config after the draws")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
@@ -1610,6 +1612,21 @@ def parse_args():
                         choices=["dbscan", "strongest", "variable_sign", "sectors8", "kmeans"],
                         help="revision-1 E: winner grouping passed to run_track (default dbscan = original)")
     return parser.parse_args()
+
+
+def _parse_set_param(items):
+    """Night 5: ["radius=3", "box_size=30", "timewindow=2d"] -> {"radius": 3, "box_size": 30.0, "timewindow": "2d"}."""
+    out = {}
+    for s in items:
+        k, v = s.split("=", 1)
+        try:
+            out[k] = int(v)
+        except ValueError:
+            try:
+                out[k] = float(v)
+            except ValueError:
+                out[k] = v
+    return out
 
 
 def night2_case_kwargs(args):
@@ -1675,6 +1692,9 @@ def main():
     if args.force_prob_rule:
         for _, trial in all_jobs:
             trial["prob_rule"] = args.force_prob_rule
+    if args.set_param:   # night-5 T4 out-of-sample check (opt-in): fixed values after the draws
+        for _, trial in all_jobs:
+            trial.update(_parse_set_param(args.set_param))
     global STABILITY
     if args.stability_selection:
         STABILITY = dict(n_sub=20, frac=0.5, thr=0.6, seed=0)
