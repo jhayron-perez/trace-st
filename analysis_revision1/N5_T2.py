@@ -205,8 +205,8 @@ def fig_case(case, L, W, cfg):
     axc, axd = fig.add_subplot(gsp[1, 0:2]), fig.add_subplot(gsp[1, 2])
     roles = cfg["roles"]
     ext_vars = cfg["ext"][1]
-    for ax, set_, ttl in ((axa, "orig", f"Original set ({len(cfg['orig'][1])} variables)"),
-                          (axb, "ext", f"Extended set ({len(ext_vars)} variables)")):
+    for ax, set_, ttl in ((axa, "orig", f"Original set, {len(cfg['orig'][1])} variables"),
+                          (axb, "ext", f"Extended set, {len(ext_vars)} variables")):
         x = L[(L["case"] == case) & (L["set"] == set_) & (L["cfgset"] == "paired") & ~L["var"].str.startswith("role:")]
         for v in cfg[set_][1]:
             g = x[x["var"] == v].sort_values("lead")
@@ -218,7 +218,7 @@ def fig_case(case, L, W, cfg):
         for (w0, w1), c in zip(WINDOWS[case], S.WINDOW_COLORS):
             ax.axvspan(w0 - 0.5, w1 + 0.5, color=c, alpha=0.06, lw=0)
         n = int(x["n_cfg"].max()) if len(x) else 0
-        ax.set_title(f"{ttl}, n = {n}", loc="left")
+        ax.set_title(f"{ttl} (n = {n})", loc="center", fontsize=6.5)
         ax.set_xlabel("Lead before the event (days)"); ax.set_ylabel("Share of trajectory density")
         ax.set_ylim(0, None); ax.set_xlim(0.5, x["lead"].max() + 0.5 if len(x) else 1)
     hs, ls_ = axb.get_legend_handles_labels()
@@ -238,7 +238,8 @@ def fig_case(case, L, W, cfg):
                     axc.bar(k + (i - nv / 2 + 0.5) * bw + off, float(r["frac_rank1"].iloc[0]), bw / 2,
                             color=S.col(v), edgecolor="white" if hatch else S.col(v), hatch=hatch, lw=0.3)
     axc.set_xticks(range(len(wins))); axc.set_xticklabels([f"{wl[1:].replace('-', '–')} d" for wl in wins])
-    axc.set_ylabel("Fraction of configs\nwith rank 1"); axc.set_ylim(0, 1)
+    axc.set_ylabel("Fraction of configs\nwith rank 1"); axc.set_ylim(0, 1.05)
+    axc.set_title("Bar colours = variables as in a, b; hatched = original set", fontsize=6)
     from matplotlib.patches import Patch
     axc.legend([Patch(facecolor="0.6", hatch="////", edgecolor="white"), Patch(facecolor="0.6")],
                ["original set", "extended set"], loc="upper right", ncol=2)
@@ -255,8 +256,9 @@ def fig_case(case, L, W, cfg):
                 axd.errorbar(xq, float(q["share"].iloc[0]), yerr=[[float(q["share"].iloc[0] - q["lo"].iloc[0])],
                              [float(q["hi"].iloc[0] - q["share"].iloc[0])]], color="k", lw=0.6, capsize=1)
     axd.set_xticks(range(len(wins))); axd.set_xticklabels([f"{wl[1:].replace('-', '–')} d" for wl in wins])
-    axd.set_ylabel("Summed share (extended)"); axd.set_ylim(0, 1); axd.legend(loc="upper right", fontsize=5.5)
-    S.panel_labels([axa, axb, axc, axd])
+    axd.set_ylabel("Summed share by role\n(extended set)"); axd.set_ylim(0, 1.15)
+    axd.legend(loc="upper right", fontsize=5.2, ncol=2, columnspacing=0.6, handlelength=1.0)
+    S.panel_labels([axa, axb, axc, axd], x=-0.2, y=1.08)
     fig.suptitle(cfg["title"], x=0.02, ha="left", fontsize=8, fontweight="bold")
     return S.save(fig, "real_cases", f"{case}_original_vs_extended")
 

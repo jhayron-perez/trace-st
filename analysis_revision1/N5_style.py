@@ -28,7 +28,7 @@ VAR_COLORS = {
     "WS10": "#56B4E9", "MSLP": "#555555",
     # Pinatubo
     "TMSO201": "#D55E00", "BURDENSO401": "#0072B2", "TMH2SO401": "#CC79A7", "AEROD_v": "#999999",
-    "TMSO203": "#E69F00", "BURDENSO403": "#56B4E9", "FLUT": "#882255", "T050": "#000000", "FSDS": "#AA4499",
+    "TMSO203": "#E69F00", "BURDENSO403": "#56B4E9", "FLUT": "#882255", "T050": "#332288", "FSDS": "#AA4499",
     # PNW
     "Z500": "#000000", "Z10": "#999999", "MTNLWRF": "#CC79A7", "TCWV": "#0072B2", "MSLHF": "#E69F00",
     "MSSHF": "#D55E00", "T2M": "#882255", "BLH": "#56B4E9",
@@ -38,8 +38,8 @@ LABELS = {"precip": "Precip.", "Tb": "BT", "vo": "Vorticity", "CAPE": "CAPE", "D
           "AEROD_v": "AOD", "TMSO203": "SO$_2$ (tag 03)", "BURDENSO403": "SO$_4$ (tag 03)", "FLUT": "FLUT",
           "T050": "T050", "FSDS": "FSDS", "Z500": "Z500", "Z10": "Z10", "MTNLWRF": "OLR", "TCWV": "TCWV",
           "MSLHF": "SLHF", "MSSHF": "SSHF", "T2M": "T2m", "BLH": "BLH"}
-ROLE_COLORS = {"parent": "#0072B2", "intermediate": "#CC79A7", "candidate": "#E69F00", "competitor": "#D55E00",
-               "child": "#882255", "surrogate": "#999999"}
+ROLE_COLORS = {"parent": "#000000", "intermediate": "#999999", "candidate": "#CC79A7", "competitor": "#E69F00",
+               "child": "#882255", "surrogate": "#BBBBBB"}   # role bars; hatched = original set
 ROLE_LABELS = {"parent": "Parent / path", "intermediate": "Intermediate", "candidate": "Paper candidate",
                "competitor": "Competitor", "child": "Child", "surrogate": "Surrogate"}
 CLASS_COLORS = {"true": "#0072B2", "noise": "#999999", "response": "#CC79A7", "moving": "#56B4E9",
