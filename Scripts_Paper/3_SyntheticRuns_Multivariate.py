@@ -130,8 +130,20 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
 
 def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
                       sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1,
-                      moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0, decoy_driver="parent", B=None):
+                      moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0, decoy_driver="parent", B=None,
+                      decoy_lag=1, decoy_nonlinear=None, extra_mix=None):
     """Revision-1 T7 non-causal variables (none of them enters B's equation).
+
+    Night-5 T3 (opt-in; defaults = previous behaviour):
+    decoy_lag L     : decoys driven at lag L: D[t] = phi D[t-1] + beta X[t-L] + noise (no drive for t < L).
+    decoy_nonlinear : "rectified" drives with beta * max(X[t-L] - 0.5, 0), i.e. only the blob core
+                      (A, C have blob amplitude 1 and are clipped at 0, so max(X, 0) would equal X).
+    extra_mix       : list of types appended after the n_* variables, in the given order, each with its own
+                      counter k and seed: "noise" (as noise, seed+100+k, N<k>), "response" (driven by B at
+                      lag 1, seed+700+k, R<k>_B), "moving" (random placement, seed+400+k, M<k>), "delayed"
+                      (driven by A (k even) or C (k odd) at lag 2, seed+500+k, L<k>_A/C), "nonlinear"
+                      (rectified drive by A/C at lag 1, seed+600+k, Q<k>_A/C). Decoys use decoy_phi,
+                      decoy_beta and decoy_sigma; noise and moving fields as above.
 
     Night-4 C (opt-in): decoy_driver="child" makes every decoy a response decoy driven by the child B:
     D[t] = phi D[t-1] + beta B[t-1] + AR(1) noise (same noise, seed and clipping), named "D<k>_B".
@@ -170,8 +182,11 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
         nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=float(decoy_sigma), rng=np.random.default_rng(seed + 200 + k))
         D = np.zeros_like(A, dtype=np.float32)
         D[0] = nz[0]
-        for t in range(1, T):
-            D[t] = float(decoy_phi) * D[t - 1] + float(decoy_beta) * X[t - 1] + nz[t]
+        if int(decoy_lag) == 1 and not decoy_nonlinear:   # original equation (default)
+            for t in range(1, T):
+                D[t] = float(decoy_phi) * D[t - 1] + float(decoy_beta) * X[t - 1] + nz[t]
+        else:
+            D = _drive_decoy(X, nz, T, decoy_phi, decoy_beta, int(decoy_lag), decoy_nonlinear)
         if clip_to_positive:
             D = np.clip(D, 0.0, None)
         name = f"D{k + 1}_{'A' if k % 2 == 0 else 'C'}" if decoy_driver == "parent" else f"D{k + 1}_B"
@@ -200,6 +215,74 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
             M_ = np.clip(M_, 0.0, None)
         name = f"M{k + 1}"
         out.append(build_dataarray(name, M_, time_coord, ys, xs)); info.append((name, "moving"))
+    if extra_mix:
+        o2, i2 = _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, list(extra_mix), sig_y=sig_y, sig_x=sig_x,
+                                 seed=seed, clip_to_positive=clip_to_positive, decoy_phi=decoy_phi,
+                                 decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
+                                 n_moving_prev=int(n_moving) if moving_placement == "random" else 0)
+        out += o2; info += i2
+    return out, info
+
+
+def _drive_decoy(X, nz, T, phi, beta, lag, nonlinear):
+    """Night 5: D[t] = phi D[t-1] + beta f(X[t-lag]) + nz[t]; f = identity or rectified max(X - 0.5, 0)."""
+    D = np.zeros_like(nz, dtype=np.float32)
+    D[0] = nz[0]
+    for t in range(1, T):
+        drive = 0.0
+        if t - lag >= 0:
+            x = X[t - lag]
+            if nonlinear == "rectified":
+                x = np.maximum(x - 0.5, 0.0)
+            elif nonlinear:
+                raise ValueError(f"decoy_nonlinear {nonlinear!r}")
+            drive = float(beta) * x
+        D[t] = float(phi) * D[t - 1] + drive + nz[t]
+    return D
+
+
+def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig_x, seed, clip_to_positive,
+                    decoy_phi, decoy_beta, decoy_sigma, n_moving_prev=0):
+    """Night-5 T3 composition (see _build_extra_vars, extra_mix). Returns (dataarrays, [(name, type)])."""
+    out, info, cnt = [], [], {}
+    for typ in mix:
+        k = cnt.get(typ, 0); cnt[typ] = k + 1
+        if typ == "noise":
+            arr = make_spatiotemporal_ar1_noise(A.shape, phi=0.85, sigma=0.10, rng=np.random.default_rng(seed + 100 + k))
+            name = f"N{k + 1}"
+        elif typ == "moving":
+            kk = k + int(n_moving_prev)
+            rng_m = np.random.default_rng(seed + 400 + kk)
+            th = float(rng_m.uniform(0.0, 2.0 * np.pi))
+            d = np.array([np.sin(th), np.cos(th)])
+            q = rng_m.uniform(20.0, 180.0, size=2)
+            tc = float(rng_m.uniform(0.0, T - 1))
+            start = q - 2.5 * tc * d
+            end = q + 2.5 * (T - 1 - tc) * d
+            cen = bezier_centers(start, start + (end - start) / 3, start + 2 * (end - start) / 3, end, T)
+            clean = np.stack([gaussian_blob(y2d, x2d, cen[t, 0], cen[t, 1], sig_y=sig_y, sig_x=sig_x, amp=1.0)
+                              for t in range(T)]).astype(np.float32)
+            nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.85, sigma=0.10, rng=np.random.default_rng(seed + 300 + kk))
+            arr = clean + nz
+            if clip_to_positive:
+                arr = np.clip(arr, 0.0, None)
+            name = f"M{kk + 1}"
+        elif typ in ("response", "delayed", "nonlinear"):
+            off = {"response": 700, "delayed": 500, "nonlinear": 600}[typ]
+            nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=float(decoy_sigma), rng=np.random.default_rng(seed + off + k))
+            if typ == "response":
+                X, lag, nl, name = B, 1, None, f"R{k + 1}_B"
+            else:
+                drv = "A" if k % 2 == 0 else "C"
+                X = A if drv == "A" else C
+                lag, nl = (2, None) if typ == "delayed" else (1, "rectified")
+                name = f"{'L' if typ == 'delayed' else 'Q'}{k + 1}_{drv}"
+            arr = _drive_decoy(X, nz, T, decoy_phi, decoy_beta, lag, nl)
+            if clip_to_positive:
+                arr = np.clip(arr, 0.0, None)
+        else:
+            raise ValueError(f"extra_mix type {typ!r}")
+        out.append(build_dataarray(name, arr, time_coord, ys, xs)); info.append((name, typ))
     return out, info
 
 
@@ -261,6 +344,11 @@ def summarize_all_vars(case, ensemble_out, params):
     }
     for i, nm in enumerate(names):
         row[f"t7_density_{nm}"] = float(dens[i])
+    for typ in ("response", "delayed", "nonlinear"):   # night-5 extra_mix types (columns only when present)
+        if typ in types:
+            row[f"t7_n_{typ}"] = types.count(typ)
+            row[f"t7_share_density_{typ}"] = (float(sum(dens[i] for i, t in enumerate(types) if t == typ) / tot)
+                                              if tot > 0 else np.nan)
     return row
 
 
@@ -293,6 +381,9 @@ def build_multivariate_case(
     moving_offset=15.0,
     moving_tc_lag=2.0,
     decoy_driver="parent",
+    decoy_lag=1,
+    decoy_nonlinear=None,
+    extra_mix=None,
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
     (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars.
@@ -389,7 +480,16 @@ def build_multivariate_case(
     full_data_C = build_dataarray("C", C, time_coord, ys, xs)
 
     extra_list, extra_info = [], []
-    if (n_noise + n_decoy + n_moving) > 0:
+    if (n_noise + n_decoy + n_moving) > 0 or extra_mix:
+        n5kw = {}   # night-5 opt-ins, passed only when not default
+        if int(decoy_lag) != 1:
+            n5kw["decoy_lag"] = int(decoy_lag)
+        if decoy_nonlinear:
+            n5kw["decoy_nonlinear"] = str(decoy_nonlinear)
+        if extra_mix:
+            n5kw["extra_mix"] = list(extra_mix)
+            if decoy_driver == "parent":   # (the child-decoy path already passes B)
+                n5kw["B"] = B
         extra_list, extra_info = _build_extra_vars(
             A, C, (event_y, event_x), time_coord, ys, xs, x2d, y2d, T, t0,
             n_noise=n_noise, n_decoy=n_decoy, n_moving=n_moving,
@@ -397,6 +497,7 @@ def build_multivariate_case(
             decoy_phi=decoy_phi, decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
             moving_placement=moving_placement, moving_offset=moving_offset, moving_tc_lag=moving_tc_lag,
             **({} if decoy_driver == "parent" else dict(decoy_driver=decoy_driver, B=B)),
+            **n5kw,
         )
 
     full_data_run = xr.concat([full_data_A, full_data_B, full_data_C] + extra_list, dim="var")
@@ -1265,7 +1366,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             "estimated_alpha_end": row["end_frac_var1"],
             "estimated_alpha_density": row["density_frac_var1"],
         }
-        if sum(extra_vars.get(k, 0) for k in ("n_noise", "n_decoy", "n_moving")) > 0:
+        if sum(extra_vars.get(k, 0) for k in ("n_noise", "n_decoy", "n_moving")) > 0 or extra_vars.get("extra_mix"):
             row_alpha.update(summarize_all_vars(case, ensemble_out, params))
         if strength_mode != "native":
             row_alpha["strength_mode"] = str(strength_mode)
@@ -1473,6 +1574,14 @@ def parse_args():
     parser.add_argument("--decoy-sigma", type=float, default=0.1, help="T7: decoy AR(1) noise sigma")
     parser.add_argument("--decoy-driver", type=str, default="parent", choices=["parent", "child"],
                         help="night-4 C: decoys driven by A/C (parent, default = original) or by the child B (response decoy)")
+    parser.add_argument("--decoy-lag", type=int, default=1, help="night-5 T3: decoys driven at lag L (default 1 = original)")
+    parser.add_argument("--decoy-nonlinear", type=str, default=None, choices=["rectified"],
+                        help="night-5 T3: rectified drive beta*max(X[t-L]-0.5, 0) (default none = linear, original)")
+    parser.add_argument("--extra-mix", type=str, nargs="+", default=None,
+                        choices=["noise", "response", "moving", "delayed", "nonlinear"],
+                        help="night-5 T3: extra variables of these types, in this order (see _build_extra_vars)")
+    parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
+                        help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="T9: link-strength definition passed to run_track")
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
@@ -1510,6 +1619,12 @@ def night2_case_kwargs(args):
         kw["moving_tc_lag"] = float(args.moving_tc_lag)
     if getattr(args, "decoy_driver", "parent") != "parent":   # older callers build Namespaces without it
         kw["decoy_driver"] = args.decoy_driver
+    if getattr(args, "decoy_lag", 1) != 1:   # night-5 T3 opt-ins
+        kw["decoy_lag"] = int(args.decoy_lag)
+    if getattr(args, "decoy_nonlinear", None):
+        kw["decoy_nonlinear"] = args.decoy_nonlinear
+    if getattr(args, "extra_mix", None):
+        kw["extra_mix"] = list(args.extra_mix)
     return kw
 
 
@@ -1547,6 +1662,9 @@ def main():
     all_jobs = build_multivar_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.timewindow_choices:
         all_jobs = override_timewindow(all_jobs, args.timewindow_choices, args.seed)
+    if args.force_prob_rule:
+        for _, trial in all_jobs:
+            trial["prob_rule"] = args.force_prob_rule
     global STABILITY
     if args.stability_selection:
         STABILITY = dict(n_sub=20, frac=0.5, thr=0.6, seed=0)
@@ -1642,7 +1760,7 @@ def main():
                 args.ensemble_size,
                 args.seed,
                 dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving,
-                     **({} if args.n_decoy == 0 else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
+                     **({} if (args.n_decoy == 0 and not args.extra_mix) else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
                                                           decoy_sigma=args.decoy_sigma)),
                      **n2kw),
                 args.strength_mode,
