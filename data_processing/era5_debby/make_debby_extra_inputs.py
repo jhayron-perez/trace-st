@@ -15,6 +15,8 @@ Fields (--field):
   vo500700 : relative vorticity, mean over --levels (default 500 550 600 650 700 hPa)
   d200     : divergence at 200 hPa (--levels 200)
   cape     : CAPE (surface analysis)
+  msl      : mean sea level pressure (night 5)
+  ws10     : 10 m wind speed sqrt(u10^2 + v10^2), hourly, before standardization (night 5)
 
 Usage:
   python make_debby_extra_inputs.py --field vo500700 --year 2006 --out OUT.nc [--nproc 8]
@@ -36,6 +38,9 @@ SPEC = {
     "vo500700": dict(kind="pl", code="128_138_vo", var="VO", out="vo", levels=[500, 550, 600, 650, 700]),
     "d200": dict(kind="pl", code="128_155_d", var="D", out="d", levels=[200]),
     "cape": dict(kind="sfc", code="128_059_cape", var="CAPE", out="cape", levels=None),
+    # night 5 (Debby children): MSLP and 10 m wind speed |(u10, v10)| from hourly u10, v10 (speed before standardizing)
+    "msl": dict(kind="sfc", code="128_151_msl", var="MSL", out="msl", levels=None),
+    "ws10": dict(kind="sfc", code="128_165_10u+128_166_10v", var="VAR_10U+VAR_10V", out="ws10", levels=None),
 }
 
 
@@ -57,6 +62,11 @@ def _read_pl_day(args):
 
 def _read_sfc_month(args):
     code, var, month = args
+    if "+" in code:   # night 5: derived wind speed from the u and v files
+        (cu, cv), (vu, vv) = code.split("+"), var.split("+")
+        u = _read_sfc_month((cu, vu, month))
+        v = _read_sfc_month((cv, vv, month))
+        return np.sqrt(u ** 2 + v ** 2)
     end = (month + pd.offsets.MonthEnd(0))
     f = RDA / "e5.oper.an.sfc" / month.strftime("%Y%m") / (
         f"e5.oper.an.sfc.{code}.ll025sc.{month:%Y%m}0100_{end:%Y%m%d}23.nc")

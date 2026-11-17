@@ -36,6 +36,7 @@ JOINT = Path("/glade/derecho/scratch/jhayron/DataCaStLeBTs/JointFiles")
 SPEC = {  # stem -> (ERA5 code, variable name in the ERA5 file)
     "t2m": ("128_167_2t.ll025sc", "VAR_2T"),
     "tcc": ("128_164_tcc.ll025sc", "TCC"),
+    "blh": ("128_159_blh.ll025sc", "BLH"),   # night 5: boundary-layer height (PNW child)
     "tcwv": ("128_137_tcwv.ll025sc", "TCWV"),   # validation only
 }
 LAT = np.arange(-30, 91, 1)
