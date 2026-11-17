@@ -131,7 +131,7 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
 def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
                       sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1,
                       moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0, decoy_driver="parent", B=None,
-                      decoy_lag=1, decoy_nonlinear=None, extra_mix=None):
+                      decoy_lag=1, decoy_nonlinear=None, extra_mix=None, mix_beta=None):
     """Revision-1 T7 non-causal variables (none of them enters B's equation).
 
     Night-5 T3 (opt-in; defaults = previous behaviour):
@@ -219,7 +219,8 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
         o2, i2 = _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, list(extra_mix), sig_y=sig_y, sig_x=sig_x,
                                  seed=seed, clip_to_positive=clip_to_positive, decoy_phi=decoy_phi,
                                  decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
-                                 n_moving_prev=int(n_moving) if moving_placement == "random" else 0)
+                                 n_moving_prev=int(n_moving) if moving_placement == "random" else 0,
+                                 **({"mix_beta": dict(mix_beta)} if mix_beta else {}))
         out += o2; info += i2
     return out, info
 
@@ -242,8 +243,10 @@ def _drive_decoy(X, nz, T, phi, beta, lag, nonlinear):
 
 
 def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig_x, seed, clip_to_positive,
-                    decoy_phi, decoy_beta, decoy_sigma, n_moving_prev=0):
-    """Night-5 T3 composition (see _build_extra_vars, extra_mix). Returns (dataarrays, [(name, type)])."""
+                    decoy_phi, decoy_beta, decoy_sigma, n_moving_prev=0, mix_beta=None):
+    """Night-5 T3 composition (see _build_extra_vars, extra_mix). Returns (dataarrays, [(name, type)]).
+    mix_beta: optional {type: beta} overriding decoy_beta for that decoy type (rule-4 fairness adjustment)."""
+    mix_beta = dict(mix_beta or {})
     out, info, cnt = [], [], {}
     for typ in mix:
         k = cnt.get(typ, 0); cnt[typ] = k + 1
@@ -277,7 +280,7 @@ def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig
                 X = A if drv == "A" else C
                 lag, nl = (2, None) if typ == "delayed" else (1, "rectified")
                 name = f"{'L' if typ == 'delayed' else 'Q'}{k + 1}_{drv}"
-            arr = _drive_decoy(X, nz, T, decoy_phi, decoy_beta, lag, nl)
+            arr = _drive_decoy(X, nz, T, decoy_phi, float(mix_beta.get(typ, decoy_beta)), lag, nl)
             if clip_to_positive:
                 arr = np.clip(arr, 0.0, None)
         else:
@@ -384,6 +387,7 @@ def build_multivariate_case(
     decoy_lag=1,
     decoy_nonlinear=None,
     extra_mix=None,
+    mix_beta=None,
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
     (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars.
@@ -488,6 +492,8 @@ def build_multivariate_case(
             n5kw["decoy_nonlinear"] = str(decoy_nonlinear)
         if extra_mix:
             n5kw["extra_mix"] = list(extra_mix)
+            if mix_beta:
+                n5kw["mix_beta"] = dict(mix_beta)
             if decoy_driver == "parent":   # (the child-decoy path already passes B)
                 n5kw["B"] = B
         extra_list, extra_info = _build_extra_vars(
@@ -1580,6 +1586,8 @@ def parse_args():
     parser.add_argument("--extra-mix", type=str, nargs="+", default=None,
                         choices=["noise", "response", "moving", "delayed", "nonlinear"],
                         help="night-5 T3: extra variables of these types, in this order (see _build_extra_vars)")
+    parser.add_argument("--mix-beta", type=str, nargs="+", default=None,
+                        help="night-5 T3: per-type beta for --extra-mix decoys, e.g. delayed=0.2 (default: --decoy-beta)")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
@@ -1625,6 +1633,8 @@ def night2_case_kwargs(args):
         kw["decoy_nonlinear"] = args.decoy_nonlinear
     if getattr(args, "extra_mix", None):
         kw["extra_mix"] = list(args.extra_mix)
+    if getattr(args, "mix_beta", None):
+        kw["mix_beta"] = {k: float(v) for k, v in (s.split("=") for s in args.mix_beta)}
     return kw
 
 

@@ -110,6 +110,17 @@ class TestGeneratorNight5(unittest.TestCase):
         c5 = self.m.build_multivariate_case(alpha_mix=0.6, extra_mix=mix[:2], decoy_phi=0.5, decoy_beta=0.8)
         self.assertEqual(c5["full_data_run"].values.tobytes(), fd.isel(var=slice(0, 5)).values.tobytes())
 
+    def test_mix_beta_per_type(self):
+        mix = ["noise", "response", "moving", "delayed", "nonlinear"]
+        a = self.m.build_multivariate_case(alpha_mix=0.2, extra_mix=mix, decoy_phi=0.5, decoy_beta=0.8,
+                                           mix_beta={"delayed": 0.2})
+        b = self.m.build_multivariate_case(alpha_mix=0.2, extra_mix=mix, decoy_phi=0.5, decoy_beta=0.8)
+        c = self.m.build_multivariate_case(alpha_mix=0.2, extra_mix=mix, decoy_phi=0.5, decoy_beta=0.2)
+        fa, fb, fc = (x["full_data_run"] for x in (a, b, c))
+        for v in ("A", "B", "C", "N1", "R1_B", "M1", "Q1_A"):
+            self.assertEqual(fa.sel(var=v).values.tobytes(), fb.sel(var=v).values.tobytes(), v)
+        self.assertEqual(fa.sel(var="L1_A").values.tobytes(), fc.sel(var="L1_A").values.tobytes())
+
     def test_force_prob_rule_draws_unchanged(self):
         jobs = self.m.build_multivar_jobs(20, seed=11)
         jobs2 = self.m.build_multivar_jobs(20, seed=11)
