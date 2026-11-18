@@ -131,7 +131,7 @@ def build_dataarray(var_name, arr, time_coord, ys, xs):
 def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noise, n_decoy, n_moving,
                       sig_y, sig_x, seed, clip_to_positive=True, decoy_phi=0.8, decoy_beta=0.8, decoy_sigma=0.1,
                       moving_placement="event", moving_offset=15.0, moving_tc_lag=2.0, decoy_driver="parent", B=None,
-                      decoy_lag=1, decoy_nonlinear=None, extra_mix=None, mix_beta=None):
+                      decoy_lag=1, decoy_nonlinear=None, extra_mix=None, mix_beta=None, t_pad=0):
     """Revision-1 T7 non-causal variables (none of them enters B's equation).
 
     Night-5 T3 (opt-in; defaults = previous behaviour):
@@ -220,7 +220,8 @@ def _build_extra_vars(A, C, event, time_coord, ys, xs, x2d, y2d, T, t0, *, n_noi
                                  seed=seed, clip_to_positive=clip_to_positive, decoy_phi=decoy_phi,
                                  decoy_beta=decoy_beta, decoy_sigma=decoy_sigma,
                                  n_moving_prev=int(n_moving) if moving_placement == "random" else 0,
-                                 **({"mix_beta": dict(mix_beta)} if mix_beta else {}))
+                                 **({"mix_beta": dict(mix_beta)} if mix_beta else {}),
+                                 **({"t_pad": int(t_pad)} if t_pad else {}))
         out += o2; info += i2
     return out, info
 
@@ -243,9 +244,11 @@ def _drive_decoy(X, nz, T, phi, beta, lag, nonlinear):
 
 
 def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig_x, seed, clip_to_positive,
-                    decoy_phi, decoy_beta, decoy_sigma, n_moving_prev=0, mix_beta=None):
+                    decoy_phi, decoy_beta, decoy_sigma, n_moving_prev=0, mix_beta=None, t_pad=0):
     """Night-5 T3 composition (see _build_extra_vars, extra_mix). Returns (dataarrays, [(name, type)]).
-    mix_beta: optional {type: beta} overriding decoy_beta for that decoy type (rule-4 fairness adjustment)."""
+    mix_beta: optional {type: beta} overriding decoy_beta for that decoy type (rule-4 fairness adjustment).
+    t_pad (night 6): T includes t_pad prepended days; moving tracks are drawn for T - t_pad and held at
+    their first position during the pad (see build_multivariate_case)."""
     mix_beta = dict(mix_beta or {})
     out, info, cnt = [], [], {}
     for typ in mix:
@@ -255,14 +258,17 @@ def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig
             name = f"N{k + 1}"
         elif typ == "moving":
             kk = k + int(n_moving_prev)
+            Tm = T - int(t_pad)
             rng_m = np.random.default_rng(seed + 400 + kk)
             th = float(rng_m.uniform(0.0, 2.0 * np.pi))
             d = np.array([np.sin(th), np.cos(th)])
             q = rng_m.uniform(20.0, 180.0, size=2)
-            tc = float(rng_m.uniform(0.0, T - 1))
+            tc = float(rng_m.uniform(0.0, Tm - 1))
             start = q - 2.5 * tc * d
-            end = q + 2.5 * (T - 1 - tc) * d
-            cen = bezier_centers(start, start + (end - start) / 3, start + 2 * (end - start) / 3, end, T)
+            end = q + 2.5 * (Tm - 1 - tc) * d
+            cen = bezier_centers(start, start + (end - start) / 3, start + 2 * (end - start) / 3, end, Tm)
+            if t_pad:
+                cen = np.concatenate([np.repeat(cen[:1], int(t_pad), axis=0), cen])
             clean = np.stack([gaussian_blob(y2d, x2d, cen[t, 0], cen[t, 1], sig_y=sig_y, sig_x=sig_x, amp=1.0)
                               for t in range(T)]).astype(np.float32)
             nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.85, sigma=0.10, rng=np.random.default_rng(seed + 300 + kk))
@@ -388,14 +394,19 @@ def build_multivariate_case(
     decoy_nonlinear=None,
     extra_mix=None,
     mix_beta=None,
+    t_pad=0,
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
     (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars.
     Night-2 opt-ins (defaults = original): target_driver="observed" drives B with the observed
-    (noisy, clipped) A and C instead of A_clean / C_clean; parent_sigma sets sigma_A = sigma_C."""
+    (noisy, clipped) A and C instead of A_clean / C_clean; parent_sigma sets sigma_A = sigma_C.
+    Night-6 T4 opt-in t_pad (default 0 = original): t_pad days are prepended so that longer windows fit
+    (fixed-ratio curve). The blob tracks (A, C and the extra_mix moving blobs) are computed for the original T
+    and held at their first position during the pad; all noise and decoy recursions run over T + t_pad;
+    B is driven in the last N_inject days as before. case["T"] = T + t_pad."""
     if parent_sigma is not None:
         sigma_A = sigma_C = float(parent_sigma)
-    time_coord = pd.date_range("2001-01-01", periods=T, freq="D")
+    time_coord = pd.date_range("2001-01-01", periods=T + int(t_pad), freq="D")
 
     Y_MIN, Y_MAX = 0, 200
     X_MIN, X_MAX = 0, 200
@@ -422,6 +433,12 @@ def build_multivariate_case(
         end=(event_y, event_x),
         T=T,
     )
+    if t_pad:   # night-6 T4 (opt-in): blobs held at their first position during the prepended days
+        if int(n_moving) > 0:
+            raise ValueError("t_pad is implemented for extra_mix moving blobs only (n_moving must be 0)")
+        centers_A = np.concatenate([np.repeat(centers_A[:1], int(t_pad), axis=0), centers_A])
+        centers_C = np.concatenate([np.repeat(centers_C[:1], int(t_pad), axis=0), centers_C])
+        T = T + int(t_pad)
 
     A_clean = np.zeros((T, NY, NX), dtype=np.float32)
     C_clean = np.zeros((T, NY, NX), dtype=np.float32)
@@ -496,6 +513,8 @@ def build_multivariate_case(
                 n5kw["mix_beta"] = dict(mix_beta)
             if decoy_driver == "parent":   # (the child-decoy path already passes B)
                 n5kw["B"] = B
+            if t_pad:
+                n5kw["t_pad"] = int(t_pad)
         extra_list, extra_info = _build_extra_vars(
             A, C, (event_y, event_x), time_coord, ys, xs, x2d, y2d, T, t0,
             n_noise=n_noise, n_decoy=n_decoy, n_moving=n_moving,
@@ -1611,6 +1630,11 @@ def parse_args():
     parser.add_argument("--grouping", type=str, default="dbscan",
                         choices=["dbscan", "strongest", "variable_sign", "sectors8", "kmeans"],
                         help="revision-1 E: winner grouping passed to run_track (default dbscan = original)")
+    parser.add_argument("--timewindow-scale-to-p3", action="store_true",
+                        help="night-6 T4: grow each trial's drawn W so that N_samples/N_features equals its p = 3 value "
+                             "(W_p = 1 + round((W - 1) p / 3); see scale_timewindow_to_p3)")
+    parser.add_argument("--t-pad", type=int, default=0,
+                        help="night-6 T4: prepend this many days to the synthetic series (default 0 = original T = 40)")
     return parser.parse_args()
 
 
@@ -1652,7 +1676,26 @@ def night2_case_kwargs(args):
         kw["extra_mix"] = list(args.extra_mix)
     if getattr(args, "mix_beta", None):
         kw["mix_beta"] = {k: float(v) for k, v in (s.split("=") for s in args.mix_beta)}
+    if getattr(args, "t_pad", 0):   # night-6 T4
+        kw["t_pad"] = int(args.t_pad)
     return kw
+
+
+def scale_timewindow_to_p3(jobs, p, p_ref=3):
+    """Night-6 T4 (fixed-ratio curve). The EN regression of one step (castle_core.mv_CaStLe_GRANGER, lag 1) has
+    N_samples = (ny - 2r)(nx - 2r)(W - 1) stencil pairs (reference cells of the box x consecutive time pairs in the
+    window of W steps) and N_features = p (2r + 1)^2 (p variables x stencil), as in summarize_all_vars
+    (t7_n_samples, t7_n_features). With box and r fixed per trial the ratio scales as (W - 1) / p, so
+    W_p = 1 + round((W - 1) p / p_ref) keeps it at the p_ref value (exact when (W - 1) p / p_ref is an integer).
+    Returns new jobs (other parameters unchanged)."""
+    out = []
+    for trial_id, trial in jobs:
+        t = dict(trial)
+        w = int(pd.to_timedelta(t["timewindow"]) / pd.to_timedelta("1d"))
+        t["timewindow_drawn"] = str(trial["timewindow"])
+        t["timewindow"] = f"{1 + int(np.floor((w - 1) * int(p) / float(p_ref) + 0.5))}d"
+        out.append((trial_id, t))
+    return out
 
 
 def override_timewindow(jobs, choices, seed):
@@ -1695,6 +1738,12 @@ def main():
     if args.set_param:   # night-5 T4 out-of-sample check (opt-in): fixed values after the draws
         for _, trial in all_jobs:
             trial.update(_parse_set_param(args.set_param))
+    p_run = 3 + args.n_noise + args.n_decoy + args.n_moving + len(args.extra_mix or [])
+    if args.timewindow_scale_to_p3:   # night-6 T4 fixed-ratio curve (opt-in)
+        all_jobs = scale_timewindow_to_p3(all_jobs, p_run)
+        w_max = max(int(pd.to_timedelta(t["timewindow"]) / pd.to_timedelta("1d")) for _, t in all_jobs)
+        if w_max + 30 - 1 > 40 + args.t_pad:   # 30 = n_steps_time, 40 = T (evaluate_trial_across_alphas_full)
+            raise SystemExit(f"--timewindow-scale-to-p3: W up to {w_max}d needs --t-pad >= {w_max + 29 - 40}")
     global STABILITY
     if args.stability_selection:
         STABILITY = dict(n_sub=20, frac=0.5, thr=0.6, seed=0)
@@ -1722,6 +1771,8 @@ def main():
         **({"timewindow_choices": list(args.timewindow_choices)} if args.timewindow_choices else {}),
         **({} if args.grouping == "dbscan" else {"grouping": args.grouping}),
         **({"stability": STABILITY} if STABILITY else {}),
+        **({"timewindow_scale_to_p3": dict(p=int(p_run), timewindows={str(i): t["timewindow"] for i, t in all_jobs})}
+           if args.timewindow_scale_to_p3 else {}),
         "n_total_trials": len(all_jobs),
         "n_completed_trials_found_at_start": len(completed_ids),
         "n_pending_trials_at_start": len(pending_jobs),
