@@ -182,7 +182,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     T, agg = samples_table()
     T.to_csv(OUT / "T4syn_samples_per_config.csv", index=False); agg.to_csv(OUT / "T4syn_samples.csv", index=False)
-    rows, summ, links, msub = [], [], [], []
+    rows, summ, links, msub, store = [], [], [], [], {}
     for curve in CURVES:
         for p in PS:
             pc = load_curve(curve, p)
@@ -195,7 +195,7 @@ def main():
                 print(f"WARNING {curve} p={p}: run windows differ from the table by up to {bad} d")
             pc["curve"] = curve; pc["p"] = p
             rows.append(pc)
-            summ += summarize(curve, p, pc)
+            summ += summarize(curve, p, pc); store[(curve, p)] = pc
             ls = linkstats_dirs(run_dirs(curve, p), var_names(p))
             if ls:
                 links.append(dict(curve=curve, p=p, **ls))
@@ -208,10 +208,16 @@ def main():
                 if curve == "fr":
                     print(f"bundle check fr p={p}: max |share_true diff| "
                           f"{(dev.share_true - dev.share_true_run).abs().max():.2e}")
-                msub += summarize(f"{curve}_M{M_FR}", p, bm)
+                msub += summarize(f"{curve}_M{M_FR}", p, bm); store[(f"{curve}_M{M_FR}", p)] = bm
     if not rows:
         return
-    P = pd.concat(rows); Sm = pd.DataFrame(summ + msub); Lk = pd.DataFrame(links)
+    # configs with both alphas at every p of both curves (partial runs drop the slow configs; compare on these)
+    full = [set(g.groupby("trial_id")["alpha"].nunique().loc[lambda s: s == 2].index) for k, g in store.items()]
+    common = sorted(set.intersection(*full)) if full else []
+    comm = [r for (c, p), g in store.items() for r in summarize(c, p, g[g["trial_id"].isin(common)])]
+    Sm = pd.concat([pd.DataFrame(summ + msub).assign(subset="all"), pd.DataFrame(comm).assign(subset="common")])
+    P = pd.concat(rows); Lk = pd.DataFrame(links)
+    print(f"common configs (both alphas, every p, both curves): {len(common)}")
     P.to_csv(OUT / "T4syn_per_config.csv", index=False); Sm.to_csv(OUT / "T4syn_summary.csv", index=False)
     Lk.to_csv(OUT / "T4syn_linkstats.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_columns", 60):
@@ -220,10 +226,12 @@ def main():
             + [c for c in Sm.columns if c.startswith("share_") and not c.endswith(("_lo", "_hi", "_median"))
                and c != "share_true"] + ["alpha_err", "alpha_err_lo", "alpha_err_hi", "completion", "ratio_median"]
         print(Sm[[c for c in cols if c in Sm]].round(3).to_string()); print(Lk.round(3).to_string())
-    figure(Sm, Lk)
+    sub = "all" if (Sm[(Sm.subset == "all") & (Sm.alpha == "pooled")].n_cfg.min() == 50) else "common"
+    print("figure subset:", sub)
+    figure(Sm[Sm.subset == sub], Lk, None if sub == "all" else len(common))
 
 
-def figure(Sm, Lk):
+def figure(Sm, Lk, n_common=None):
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     S.set_style()
@@ -298,6 +306,8 @@ def figure(Sm, Lk):
     ax_d2.set_ylabel("|α rec. − α|"); ax_d2.set_ylim(0, None); ax_d2.set_xlabel("Number of variables p")
     ax_d2.set_xticks(PS); plt.setp(ax_d1.get_xticklabels(), visible=False)
     ax_d1.legend(loc="lower left", fontsize=5.2)
+    if n_common is not None:   # some runs incomplete: every panel on the configs complete at every p, both curves
+        ax_a.set_title(f"{n_common} of 50 configs (complete at every p)", fontsize=6)
     S.panel_labels([ax_a, ax_b, ax_c], x=-0.14)
     S.panel_labels([ax_d1], x=-0.14, start=3)
     print("fig", S.save(fig, "synthetic", "S10_synthetic_extension"))
