@@ -19,6 +19,7 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import sys
 import copy
+import contextlib
 import json
 import time
 import traceback
@@ -403,6 +404,88 @@ def run_ensemble(case, params, M=30, seed=SEARCH_SEED):
         "params": copy.deepcopy(params),
         "M": int(M),
     }
+
+
+# -----------------------------------------------------------------------------
+# revision-1 night 6 (opt-in --parallel-members): the members of a trial run in a
+# process pool instead of one after another. Same member seeds and the same member
+# body as run_ensemble (kept unchanged above), so the ensembles are identical; only
+# elapsed_sec differs. Each pool process builds the case once (initializer).
+# -----------------------------------------------------------------------------
+_MEMBER_CASE = None
+
+
+def member_seeds(M, seed):
+    rng_local = np.random.default_rng(seed)
+    return [int(rng_local.integers(0, 2_000_000_000)) for _ in range(M)]
+
+
+def _member_pool_init(extra_inputs, vo_input):
+    global _MEMBER_CASE
+    _MEMBER_CASE = build_case_debby(extra_inputs=extra_inputs, vo_input=vo_input)
+
+
+def run_member_task(trial_id, params, m, member_seed):
+    case = _MEMBER_CASE
+    p = copy.deepcopy(params)
+    p["starting_lat"] = float(case["event_lat"])
+    p["starting_lon"] = float(case["event_lon_0360"])
+
+    np.random.seed(member_seed)  # legacy global seed; does not seed default_rng
+    p["seed"] = member_seed  # seeds run_track cluster selection (revision-1)
+    t0 = time.perf_counter()
+
+    try:
+        centers, parents, out = run_one_track(case["full_data"], p, case["date_end"])
+        ok = True
+        err = ""
+    except Exception as e:
+        centers = np.empty((0, 2), dtype=float)
+        parents = np.empty((0,), dtype=int)
+        out = None
+        ok = False
+        err = str(e)
+
+    return trial_id, {
+        "member_id": m,
+        "ok": ok,
+        "error": err,
+        "elapsed_sec": float(time.perf_counter() - t0),
+        "centers": np.asarray(centers, dtype=float),
+        "parents": np.asarray(parents, dtype=int),
+        "out": out,
+    }
+
+
+def iter_trials_parallel_members(pending_jobs, n_workers, ensemble_size, seed, extra_inputs, vo_input, ctx):
+    """Yield one evaluate_trial_worker result per trial, as soon as all its members are back.
+    Members are submitted trial by trial, so trials finish roughly in order."""
+    case = build_case_debby(extra_inputs=extra_inputs, vo_input=vo_input)
+    state = {}
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
+                             initializer=_member_pool_init, initargs=(extra_inputs, vo_input)) as ex:
+        futures = []
+        for trial_id, trial in pending_jobs:
+            params = build_params_from_trial_debby(trial, case)
+            state[int(trial_id)] = dict(trial=trial, params=params, members={}, t0=time.perf_counter())
+            for m, s in enumerate(member_seeds(ensemble_size, int(seed + 1000 * int(trial_id)))):
+                futures.append(ex.submit(run_member_task, int(trial_id), params, m, s))
+        for fut in as_completed(futures):
+            trial_id, member = fut.result()
+            st = state[trial_id]
+            st["members"][member["member_id"]] = member
+            if len(st["members"]) < ensemble_size:
+                continue
+            ensemble_out = {
+                "members": [st["members"][m] for m in range(ensemble_size)],
+                "params": copy.deepcopy(st["params"]),
+                "M": int(ensemble_size),
+            }
+            result = evaluate_trial_worker((trial_id, st["trial"]), ensemble_size, seed, extra_inputs, vo_input,
+                                           case=case, ensemble_out=ensemble_out)
+            result["trial_row"]["elapsed_sec"] = float(time.perf_counter() - st["t0"])
+            del state[trial_id]
+            yield result
 
 
 # -----------------------------------------------------------------------------
@@ -1072,16 +1155,20 @@ def filter_pending_trials(all_jobs, completed_ids):
 # -----------------------------------------------------------------------------
 # Evaluate one physically admissible parameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None, vo_input=None):
-    case = build_case_debby(extra_inputs=extra_inputs, vo_input=vo_input)
+def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None, vo_input=None,
+                         case=None, ensemble_out=None):
+    # case / ensemble_out: night 6 --parallel-members passes a prebuilt case and the pooled ensemble (default None = original)
+    if case is None:
+        case = build_case_debby(extra_inputs=extra_inputs, vo_input=vo_input)
     params = build_params_from_trial_debby(trial, case)
 
-    ensemble_out = run_ensemble(
-        case,
-        params,
-        M=ensemble_size,
-        seed=int(seed + 1000 * int(trial_id)),
-    )
+    if ensemble_out is None:
+        ensemble_out = run_ensemble(
+            case,
+            params,
+            M=ensemble_size,
+            seed=int(seed + 1000 * int(trial_id)),
+        )
 
     summary = summarize_ensemble_debby(
         case,
@@ -1118,7 +1205,8 @@ def evaluate_trial_debby(trial_id, trial, ensemble_size=30, seed=SEARCH_SEED, ex
 # -----------------------------------------------------------------------------
 # Multiprocessing wrapper for one parameter configuration
 # -----------------------------------------------------------------------------
-def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None, vo_input=None):
+def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=None, vo_input=None,
+                          case=None, ensemble_out=None):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1130,6 +1218,8 @@ def evaluate_trial_worker(job, ensemble_size=30, seed=SEARCH_SEED, extra_inputs=
             seed=seed,
             extra_inputs=extra_inputs,
             vo_input=vo_input,
+            case=case,
+            ensemble_out=ensemble_out,
         )
 
         trial_row = out["trial_row"]
@@ -1238,6 +1328,9 @@ def parse_args():
                         help="Run only these trial ids (configs still drawn for all --n-trials)")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
+    parser.add_argument("--parallel-members", action="store_true",
+                        help="night 6 (opt-in): the --n-workers pool runs ensemble members (same seeds, same ensembles) "
+                             "instead of whole trials, so one trial finishes in minutes")
     return parser.parse_args()
 
 
@@ -1346,7 +1439,12 @@ def main():
 
     ctx = mp.get_context("spawn")
 
-    with ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx) as ex:
+    if args.parallel_members:  # night 6 opt-in: pool over members (iter_trials_parallel_members owns its pool)
+        ex = contextlib.nullcontext()
+        results_iter = iter_trials_parallel_members(
+            pending_jobs, args.n_workers, args.ensemble_size, args.seed, extra_inputs, vo_input, ctx)
+    else:
+        ex = ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx)
         futures = [
             ex.submit(
                 evaluate_trial_worker,
@@ -1358,9 +1456,10 @@ def main():
             )
             for job in pending_jobs
         ]
+        results_iter = (fut.result() for fut in as_completed(futures))
 
-        for fut in as_completed(futures):
-            result = fut.result()
+    with ex:
+        for result in results_iter:
 
             trial_row = result["trial_row"]
             member_rows = result["member_rows"]
