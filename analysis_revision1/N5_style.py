@@ -6,6 +6,8 @@
   colours as figures_v2-v4 for the paper variables), one hue per role. Lead-window colours are the paper's
   (9_AnalysisHW_Figs45_v2 contour_color_by_window: 1-10 d #c98245, 11-20 d #5a284d, 21-30 d #5f93d1).
 - save(): vector PDF + 300-dpi PNG in revision1/figures_v5/<folder>/.
+- set_output(root, rename) (opt-in, night 6): redirect every save() to another root (figures_v6) and map
+  (folder, name) to new (folder, name) (paper figure numbers); default = figures_v5, names unchanged.
 """
 from __future__ import annotations
 
@@ -73,8 +75,19 @@ def panel_labels(axes, x=-0.14, y=1.04, start=0):
                 va="bottom", ha="left")
 
 
+FIG_ROOT = None   # None = FIG5 (default); set_output() sets it
+RENAME = {}
+
+
+def set_output(root=None, rename=None):
+    global FIG_ROOT, RENAME
+    FIG_ROOT = None if root is None else Path(root)
+    RENAME = dict(rename or {})
+
+
 def save(fig, folder, name):
-    d = FIG5 / folder
+    folder, name = RENAME.get((folder, name), (folder, name))
+    d = (FIG5 if FIG_ROOT is None else FIG_ROOT) / folder
     d.mkdir(parents=True, exist_ok=True)
     fig.savefig(d / f"{name}.pdf", bbox_inches="tight")
     fig.savefig(d / f"{name}.png", dpi=300, bbox_inches="tight")
