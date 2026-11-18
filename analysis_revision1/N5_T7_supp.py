@@ -69,7 +69,8 @@ def md(df, path):
 
 
 # ============================================================== E
-def run_E():
+def run_E(stencil=None):
+    """stencil (opt-in, night 6): callable(ax, ax_text) drawing an extra right-hand column (the regression stencil, S15)."""
     from EG_summary import load_tracks
     out = outdir("E")
     rows = []
@@ -116,8 +117,14 @@ def run_E():
     print(E1.round(3).to_string(), "\n", E2.round(3).to_string(), flush=True)
 
     S.set_style()
-    fig, axs = plt.subplots(2, 3, figsize=(S.DOUBLE, 11 * S.CM))
-    axs = axs.ravel()
+    if stencil is None:
+        fig, axs = plt.subplots(2, 3, figsize=(S.DOUBLE, 11 * S.CM))
+        axs = axs.ravel()
+    else:
+        fig = plt.figure(figsize=(S.DOUBLE, 12 * S.CM))
+        gs = fig.add_gridspec(2, 4, width_ratios=[1, 1, 1, 1.3])
+        axs = np.array([fig.add_subplot(gs[i, j]) for i in range(2) for j in range(3)])
+        ax_st, ax_tx = fig.add_subplot(gs[0, 3]), fig.add_subplot(gs[1, 3])
     L = E1[E1.subset == "linear"].set_index("grouping").reindex(GROUPINGS)
     A = E1[E1.subset == "all"].set_index("grouping").reindex(GROUPINGS)
     x = np.arange(len(GROUPINGS))
@@ -150,7 +157,12 @@ def run_E():
           Line2D([], [], marker="D", ls="none", mfc="white", mec="#555555", ms=3.2,
                  label="all configs, both rules (night-2 design: T1 n = 200, T2-EN n = 50)")]
     fig.legend(handles=hd, loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.03), fontsize=6)
-    S.panel_labels(axs, x=-0.3, y=1.06)
+    S.panel_labels(axs, x=-0.3, y=1.06 if stencil is None else 1.15)
+    if stencil is not None:
+        stencil(ax_st, ax_tx)
+        for ax in axs:   # narrower panels: titles right-aligned, clear of the panel letters
+            t = ax.get_title(); ax.set_title(""); ax.set_title(t, fontsize=6.3, loc="right")
+        S.panel_labels([ax_st], x=-0.08, y=1.15, start=6)
     fig.tight_layout(h_pad=1.0, w_pad=1.6, rect=(0, 0, 1, 0.96))
     print(S.save(fig, "S_DBSCAN_grouping", "S_DBSCAN_grouping"), flush=True)
 
@@ -217,10 +229,11 @@ def run_G():
     ax[1].text(39.5, 0.97, "true origin", color="#CC79A7", fontsize=6, transform=ax[1].get_xaxis_transform(), va="top")
     ax[0].text(29.5, 0.55, "paper N = 30", color="#777777", fontsize=6, transform=ax[0].get_xaxis_transform(),
                va="top", ha="right", rotation=90)
-    ax[0].set_ylabel("Mean step displacement (grid cells)")
+    ax[0].set_ylabel("Mean step displacement\n(grid cells)")
     ax[1].set_ylabel("Distance to true origin,\nmedian ± sd (grid cells)")
     ax[2].set_ylabel("Fraction of steps by parent")
-    ax[0].legend(loc="upper left"); ax[2].legend(loc="lower left", fontsize=5.3)
+    ax[0].legend(loc="upper left")
+    ax[2].legend(loc="center left", fontsize=5.3, ncol=2, bbox_to_anchor=(0.0, 0.5), columnspacing=0.8)   # between the curves
     n40 = ncfg[(40, "linear")]
     print(f"G linear configs: N40 {n40}", flush=True)
     S.panel_labels(ax, x=-0.24)
@@ -291,6 +304,7 @@ def run_H():
                 ax.set_xlabel(xl)
             if j == 0:
                 ax.set_ylabel(f"≥ {int(q*100)} % complete\nConfigurations (count)")
+            ax.set_ylim(top=ax.get_ylim()[1] * 1.55)   # headroom: legend above the bars
             ax.legend(loc="upper right", fontsize=5.3)
     for j, t in enumerate(["Origin distance", "Mean track distance", "Fraction of $V_2$ steps"]):
         axes[0, j].set_title(t)
