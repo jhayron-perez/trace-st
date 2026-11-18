@@ -245,7 +245,7 @@ def main():
                and c != "share_true"] + ["alpha_err", "alpha_err_lo", "alpha_err_hi", "completion", "ratio_median"]
         print(Sm[[c for c in cols if c in Sm]].round(3).to_string()); print(Lk.round(3).to_string())
     a = Sm[(Sm.subset == "all") & (Sm.alpha == "pooled") & Sm.curve.isin(["fw", f"fw_M{M_FR}"])]
-    sub = "all" if a.n_cfg.min() == 50 or len(cfw) < 20 else "common_fw"   # < 20 matched: all done configs, n shown
+    sub = "all" if a.n_cfg.min() == 50 or len(cfw) < 15 else "common_fw"   # < 15 matched: all done configs, n shown
     print("figure subset (a-c):", sub)
     Sab = Sm[(Sm.subset == sub) & Sm.curve.isin(["fw", f"fw_M{M_FR}"])]
     figure(pd.concat([Sab, Sm[Sm.subset == "paired"]]), Lk, len(cfw) if sub == "common_fw" else None)
@@ -337,6 +337,7 @@ def figure(Sm, Lk, n_common=None):
     if len(qn) and qn["n_pair"].min() < 50:   # panel d: configs done in both runs at that p
         for _, r in qn.iterrows():
             ax_d2.text(r["p"], 0.005, f"{int(r['n_pair'])}", ha="center", va="bottom", fontsize=4.8, color="0.35")
+        ax_d2.set_ylim(0, 1.22 * ax_d2.get_ylim()[1])   # room for the note above the data
         ax_d2.text(1.0, 1.0, "numbers: paired configs", transform=ax_d2.transAxes, ha="right", va="top", fontsize=4.8, color="0.35")
     S.panel_labels([ax_a, ax_b, ax_c], x=-0.14)
     S.panel_labels([ax_d1], x=-0.14, start=3)
