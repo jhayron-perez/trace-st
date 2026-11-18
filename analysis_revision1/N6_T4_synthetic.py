@@ -218,13 +218,24 @@ def main():
         print("complete-only:", sorted(keep))
     if not rows:
         return
-    # configs with both alphas at every p of both curves (partial runs drop the slow configs; compare on these)
-    full = [set(g.groupby("trial_id")["alpha"].nunique().loc[lambda s: s == 2].index) for k, g in store.items()]
-    common = sorted(set.intersection(*full)) if full else []
-    comm = [r for (c, p), g in store.items() for r in summarize(c, p, g[g["trial_id"].isin(common)])]
-    Sm = pd.concat([pd.DataFrame(summ + msub).assign(subset="all"), pd.DataFrame(comm).assign(subset="common")])
+    # partial runs drop the slow configs, so compare on matched configs (both alphas done):
+    # common_fw = configs done at every p of the fixed window (panels a-c); paired = per p, configs done in both the
+    # fixed-ratio run and the fixed-window run (panel d, matched M)
+    def done(g):
+        return set(g.groupby("trial_id")["alpha"].nunique().loc[lambda s: s == 2].index)
+    fwk = [k for k in store if k[0] in ("fw", f"fw_M{M_FR}")]
+    cfw = sorted(set.intersection(*[done(store[k]) for k in fwk])) if fwk else []
+    comm = [r for k in fwk for r in summarize(k[0], k[1], store[k][store[k]["trial_id"].isin(cfw)])]
+    pair = []
+    for p in PS:
+        ka, kb = ("fr", p), (f"fw_M{M_FR}", p)
+        if ka in store and kb in store:
+            cp = done(store[ka]) & done(store[kb])
+            pair += [dict(r, n_pair=len(cp)) for k in (ka, kb) for r in summarize(k[0], p, store[k][store[k]["trial_id"].isin(cp)])]
+    Sm = pd.concat([pd.DataFrame(summ + msub).assign(subset="all"), pd.DataFrame(comm).assign(subset="common_fw"),
+                    pd.DataFrame(pair).assign(subset="paired")], ignore_index=True)
     P = pd.concat(rows); Lk = pd.DataFrame(links)
-    print(f"common configs (both alphas, every p, both curves): {len(common)}")
+    print(f"fixed-window configs done at every p: {len(cfw)}")
     P.to_csv(OUT / "T4syn_per_config.csv", index=False); Sm.to_csv(OUT / "T4syn_summary.csv", index=False)
     Lk.to_csv(OUT / "T4syn_linkstats.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_columns", 60):
@@ -233,12 +244,15 @@ def main():
             + [c for c in Sm.columns if c.startswith("share_") and not c.endswith(("_lo", "_hi", "_median"))
                and c != "share_true"] + ["alpha_err", "alpha_err_lo", "alpha_err_hi", "completion", "ratio_median"]
         print(Sm[[c for c in cols if c in Sm]].round(3).to_string()); print(Lk.round(3).to_string())
-    sub = "all" if (Sm[(Sm.subset == "all") & (Sm.alpha == "pooled")].n_cfg.min() == 50) else "common"
-    print("figure subset:", sub)
-    figure(Sm[Sm.subset == sub], Lk, None if sub == "all" else len(common))
+    a = Sm[(Sm.subset == "all") & (Sm.alpha == "pooled") & Sm.curve.isin(["fw", f"fw_M{M_FR}"])]
+    sub = "all" if a.n_cfg.min() == 50 or len(cfw) < 20 else "common_fw"   # < 20 matched: all done configs, n shown
+    print("figure subset (a-c):", sub)
+    Sab = Sm[(Sm.subset == sub) & Sm.curve.isin(["fw", f"fw_M{M_FR}"])]
+    figure(pd.concat([Sab, Sm[Sm.subset == "paired"]]), Lk, len(cfw) if sub == "common_fw" else None)
 
 
 def figure(Sm, Lk, n_common=None):
+    """Sm: fixed-window rows (panels a-c, fw in d) + subset 'paired' rows (fr and fw_M4 in panel d)."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     S.set_style()
@@ -302,7 +316,7 @@ def figure(Sm, Lk, n_common=None):
                 "fr": CURVES["fr"] + f", M {M_FR}"}
     style_d = dict(CURVE_STYLE, **{f"fw_M{M_FR}": dict(color="0.55", marker="o", mfc="white", ls="--")})
     for curve, lab in curves_d.items():
-        q = Sm[(Sm["curve"] == curve) & (Sm["alpha"] == "pooled")].sort_values("p")
+        q = Sm[(Sm["curve"] == curve) & (Sm["alpha"] == "pooled") & ((Sm["subset"] == "paired") == (curve != "fw"))].sort_values("p")
         if not len(q):
             continue
         st = style_d[curve]
@@ -313,8 +327,17 @@ def figure(Sm, Lk, n_common=None):
     ax_d2.set_ylabel("|α rec. − α|"); ax_d2.set_ylim(0, None); ax_d2.set_xlabel("Number of variables p")
     ax_d2.set_xticks(PS); plt.setp(ax_d1.get_xticklabels(), visible=False)
     ax_d1.legend(loc="lower left", fontsize=5.2)
-    if n_common is not None:   # some runs incomplete: every panel on the configs complete at every p, both curves
-        ax_a.set_title(f"{n_common} of 50 configs (complete at every p)", fontsize=6)
+    if n_common is not None:   # some fixed-window runs incomplete: panels a-c on the configs done at every p
+        ax_a.set_title(f"{n_common} of 50 configs (done at every p)", fontsize=6)
+    nfw = Sm[(Sm["curve"] == "fw") & (Sm["alpha"] == "pooled")].sort_values("p")
+    if n_common is None and nfw["n_cfg"].min() < 50:   # partial runs, all done configs: n per p above the bars
+        for i, n in enumerate(nfw["n_cfg"]):
+            ax_a.text(i, 1.01, f"n={int(n)}", ha="center", va="bottom", fontsize=4.8, color="0.35", transform=ax_a.get_xaxis_transform())
+    qn = Sm[(Sm["subset"] == "paired") & (Sm["curve"] == "fr") & (Sm["alpha"] == "pooled")]
+    if len(qn) and qn["n_pair"].min() < 50:   # panel d: configs done in both runs at that p
+        for _, r in qn.iterrows():
+            ax_d2.text(r["p"], 0.005, f"{int(r['n_pair'])}", ha="center", va="bottom", fontsize=4.8, color="0.35")
+        ax_d2.text(1.0, 1.0, "numbers: paired configs", transform=ax_d2.transAxes, ha="right", va="top", fontsize=4.8, color="0.35")
     S.panel_labels([ax_a, ax_b, ax_c], x=-0.14)
     S.panel_labels([ax_d1], x=-0.14, start=3)
     print("fig", S.save(fig, "synthetic", "S10_synthetic_extension"))
