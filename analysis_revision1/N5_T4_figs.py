@@ -270,8 +270,8 @@ def fig_retention(od):
     for k, r in CNT.iterrows():
         pass
     a.set_xticks(x); a.set_xticklabels([f"{NAMES[c]}\n{int(r.n_old)}→\n{int(r.n_harmonized)}" for c, (_, r) in zip(CNT.case, CNT.iterrows())], fontsize=5)
-    a.set_ylabel("Fraction of configs retained"); a.set_ylim(0, 1.15)
-    a.legend(loc="lower left", fontsize=5, ncol=2, bbox_to_anchor=(-0.05, 1.02))
+    a.set_ylabel("Fraction of configs retained"); a.set_ylim(0, 1.5); a.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    a.legend(loc="upper left", fontsize=5, ncol=2, columnspacing=0.6, handlelength=1.4)   # inside: no overlap with b
     axs = [a]
     for k, c in enumerate([c for c in CASES if c in set(SW.case)]):
         ax = fig.add_subplot(gs[(k + 1) // 3, (k + 1) % 3])
