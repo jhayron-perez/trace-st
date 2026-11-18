@@ -1,13 +1,15 @@
 """Night-6 T4: synthetic p-curve to p = 35 and the fixed-ratio curve (figure S10; pre-declared rule 8).
 
-Runs (T2-EN, 50 configs x alpha {0.2, 0.6}, M 20, linear rule, composition = one cycle noise, response, moving,
+Runs (T2-EN, 50 configs x alpha {0.2, 0.6}, linear rule, composition = one cycle noise, response, moving,
 delayed (beta 0.2), nonlinear continued):
-  fixed window: night5/t3/p{03,05,08,12,16} (night 5, rev1-fixes-v13; reproduced byte-identically at
-                rev1-fixes-v17, checked on config 0 at p = 3) + night6/t4syn/p{20,24,28,35};
-  fixed ratio:  night6/t4syn/fr_p{03,...,35} (--timewindow-scale-to-p3 --t-pad 60: each config's drawn W grown to
-                W_p = 1 + round((W - 1) p / 3) so that N_samples / N_features stays at its p = 3 value; the series
-                has 60 days prepended (blobs at their first position), the same for every fr run, so fr_p03 vs p03
-                measures the effect of the longer series alone).
+  fixed window (M 20): night5/t3/p{03,05,08,12,16} (night 5, rev1-fixes-v13; reproduced byte-identically at
+                rev1-fixes-v17 on config 0) + night6/t4syn/p{20,24,28,35}_a0{2,6} (one dir per alpha);
+  fixed ratio (M 4, budget): night6/t4syn/fr_p{03,...,16} and fr_p{20,...,35}_a0{2,6} (--timewindow-scale-to-p3
+                --t-pad 60: each config's drawn W grown to W_p = 1 + round((W - 1) p / 3) so that
+                N_samples / N_features stays at its p = 3 value; 60 days prepended (blobs at their first position), the
+                same for every fixed-ratio run, so fr_p03 vs p03 measures the longer series alone).
+  The fixed-window curve is also recomputed from the first 4 members of each bundle (curve fw_M4; members are seeded
+  in order, so this equals an M = 4 run), because the absolute alpha error grows with Monte Carlo noise.
 N_samples = (ny - 2r)(nx - 2r)(W - 1), N_features = p (2r + 1)^2 at the event box (summarize_all_vars,
 scale_timewindow_to_p3); the table T4syn_samples.csv is computed from the 50 drawn configs (no run needed).
 Metrics (N5_T3.per_config): share of trajectory density per class, alpha recovery A / (A + C) and its absolute
@@ -19,6 +21,7 @@ python N6_T4_synthetic.py   (PBS only) -> night6/analysis/T4syn_*.csv, figures_v
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -36,16 +39,18 @@ N5, N6 = R1 / "night5", R1 / "night6"
 OUT = N6 / "analysis"
 FIG6 = R1 / "figures_v6"
 PS = [3, 5, 8, 12, 16, 20, 24, 28, 35]
+M_FR = 4   # ensemble size of the fixed-ratio runs (budget); the fixed-window curve is also shown at its first 4 members
 CYCLE = ["noise", "response", "moving", "delayed", "nonlinear"]
 MIX32 = [CYCLE[i % 5] for i in range(32)]
 CURVES = {"fw": "Fixed window (W drawn)", "fr": "Fixed ratio (W grown, N/p as p = 3)"}
 CURVE_STYLE = {"fw": dict(color="#000000", marker="o"), "fr": dict(color="#D55E00", marker="s")}
 
 
-def run_dir(curve, p):
-    if curve == "fw":
-        return (N5 / "t3" if p <= 16 else N6 / "t4syn") / f"p{p:02d}"
-    return N6 / "t4syn" / f"fr_p{p:02d}"
+def run_dirs(curve, p):
+    """Output dirs of one (curve, p); p >= 20 runs are split by alpha (<name>_a02, <name>_a06; one trial <= 8 h)."""
+    base = (N5 / "t3" if p <= 16 else N6 / "t4syn") / f"p{p:02d}" if curve == "fw" else N6 / "t4syn" / f"fr_p{p:02d}"
+    split = [base.with_name(base.name + s) for s in ("_a02", "_a06")]
+    return [d for d in [base] + split if d.exists()]
 
 
 def load(d):
@@ -53,6 +58,78 @@ def load(d):
         if (d / nm).exists():
             return pd.read_csv(d / nm)
     return None
+
+
+def _jobs_elapsed(d):
+    for nm in ("results_jobs_final.csv", "results_jobs_snapshot.csv"):
+        if (d / nm).exists():
+            j = pd.read_csv(d / nm)
+            if "elapsed_sec" in j:
+                return j[["trial_id", "elapsed_sec"]]
+    return None
+
+
+def load_curve(curve, p):
+    """per_config rows (N5_T3) of every dir of (curve, p), with completion and runtime per (config, alpha)."""
+    out = []
+    for d in run_dirs(curve, p):
+        x = load(d)
+        if x is None:
+            continue
+        pc = per_config(p, x)
+        pc["timewindow"] = x["timewindow"].map(tw_steps).to_numpy()
+        cm = completion_from_members(d, 30)
+        if cm is not None and pc["completion"].isna().all():
+            pc = pc.drop(columns="completion").merge(cm.rename(columns={"alpha_mix": "alpha"}),
+                                                     on=["trial_id", "alpha"], how="left")
+        j = _jobs_elapsed(d)
+        if j is not None:
+            pc = pc.merge(j, on="trial_id", how="left")
+        out.append(pc)
+    return pd.concat(out, ignore_index=True) if out else None
+
+
+def linkstats_dirs(dirs, names):
+    """N5_T3.linkstats pooled over dirs (selection rates weighted by the number of regressions)."""
+    parts = [r for r in (linkstats(d, names) for d in dirs) if r]
+    if not parts:
+        return {}
+    n = sum(r["n_regressions"] for r in parts)
+    out = {"n_regressions": n}
+    for k in {k for r in parts for k in r if k.startswith("sel_")}:
+        out[k] = float(sum(r[k] * r["n_regressions"] for r in parts if k in r) / n)
+    return out
+
+
+def bundle_metrics(dirs, p, m_sub):
+    """Class shares and alpha error from the first m_sub members of every bundle (members are seeded in order, so the
+    first m_sub of an M = 20 ensemble are exactly an M = m_sub run). Density per variable as summarize_all_vars:
+    sum over the member's centres with that parent of the number of grid points in the box around the centre."""
+    ys, xs = SYN_GRID
+    names = var_names(p)
+    rows = []
+    for d in dirs:
+        for f in sorted((d / "bundles").glob("trial_*.npz")):
+            meta = json.load(open(f.with_suffix(".json")))
+            z = np.load(f)
+            half = float(meta["params"]["box_size"]) / 2.0
+            order = np.argsort(z["member_id"])[:m_sub]
+            dens = np.zeros(len(names))
+            for i in order:
+                if not z["ok"][i] or z["lengths"][i] == 0:
+                    continue
+                c = z["centers"][i, : z["lengths"][i]].astype(float); pa = z["parents"][i, : z["lengths"][i]]
+                w = (np.abs(xs[None, :] - c[:, 1:2]) <= half).sum(1) * (np.abs(ys[None, :] - c[:, 0:1]) <= half).sum(1)
+                np.add.at(dens, pa - 1, w)
+            tot = dens.sum()
+            r = dict(trial_id=int(meta["trial_id"]), alpha=float(meta["alpha_mix"]))
+            for k in CLASSES:
+                idx = [i for i, v in enumerate(names) if cls(v) == k]
+                r[f"share_{k}"] = float(dens[idx].sum() / tot) if idx and tot > 0 else np.nan
+            a, c_ = dens[0], dens[2]
+            r["alpha_err"] = float(abs(a / (a + c_) - r["alpha"])) if a + c_ > 0 else np.nan
+            rows.append(r)
+    return pd.DataFrame(rows)
 
 
 def var_names(p):
@@ -105,40 +182,36 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     T, agg = samples_table()
     T.to_csv(OUT / "T4syn_samples_per_config.csv", index=False); agg.to_csv(OUT / "T4syn_samples.csv", index=False)
-    rows, summ, links = [], [], []
+    rows, summ, links, msub = [], [], [], []
     for curve in CURVES:
         for p in PS:
-            d = run_dir(curve, p)
-            x = load(d)
-            if x is None:
-                print("missing", d); continue
-            pc = per_config(p, x)
-            cm = completion_from_members(d, 30)
-            if cm is not None and pc["completion"].isna().all():
-                pc = pc.drop(columns="completion").merge(cm.rename(columns={"alpha_mix": "alpha"}),
-                                                         on=["trial_id", "alpha"], how="left")
-            jf = d / "results_jobs_final.csv"
-            if not jf.exists():
-                jf = d / "results_jobs_snapshot.csv"
-            if jf.exists():
-                j = pd.read_csv(jf)
-                if "elapsed_sec" in j:
-                    pc = pc.merge(j[["trial_id", "elapsed_sec"]], on="trial_id", how="left")
+            pc = load_curve(curve, p)
+            if pc is None:
+                print("missing", curve, p); continue
             tt = T[(T.curve == curve) & (T.p == p)][["trial_id", "W", "n_samples", "n_features", "ratio"]]
             pc = pc.merge(tt, on="trial_id", how="left")
-            w_run = x.groupby("trial_id")["timewindow"].first().map(tw_steps)
-            bad = (w_run - pc.groupby("trial_id")["W"].first()).abs().max()
+            bad = (pc["timewindow"] - pc["W"]).abs().max()
             if bad > 0:
                 print(f"WARNING {curve} p={p}: run windows differ from the table by up to {bad} d")
             pc["curve"] = curve; pc["p"] = p
             rows.append(pc)
             summ += summarize(curve, p, pc)
-            ls = linkstats(d, var_names(p))
+            ls = linkstats_dirs(run_dirs(curve, p), var_names(p))
             if ls:
                 links.append(dict(curve=curve, p=p, **ls))
+            # matched ensemble size: fixed window recomputed from its first M_FR members; fixed ratio from all its
+            # members (check against the run's own summary)
+            bm = bundle_metrics(run_dirs(curve, p), p, M_FR)
+            if len(bm):
+                dev = bm.merge(pc[["trial_id", "alpha", "share_true", "alpha_err"]], on=["trial_id", "alpha"],
+                               suffixes=("", "_run"))
+                if curve == "fr":
+                    print(f"bundle check fr p={p}: max |share_true diff| "
+                          f"{(dev.share_true - dev.share_true_run).abs().max():.2e}")
+                msub += summarize(f"{curve}_M{M_FR}", p, bm)
     if not rows:
         return
-    P = pd.concat(rows); Sm = pd.DataFrame(summ); Lk = pd.DataFrame(links)
+    P = pd.concat(rows); Sm = pd.DataFrame(summ + msub); Lk = pd.DataFrame(links)
     P.to_csv(OUT / "T4syn_per_config.csv", index=False); Sm.to_csv(OUT / "T4syn_summary.csv", index=False)
     Lk.to_csv(OUT / "T4syn_linkstats.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_columns", 60):
@@ -210,11 +283,14 @@ def figure(Sm, Lk):
     ax_c.set_xlabel("Link-level selection rate (per variable)"); ax_c.set_ylabel("Density share per variable")
     ax_c.set_xlim(-0.02, 1.02); ax_c.set_ylim(0, None)
     # (d) fixed ratio vs fixed window: true-parent share (top) and alpha error (bottom), alphas pooled
-    for curve, lab in CURVES.items():
+    curves_d = {"fw": CURVES["fw"] + ", M 20", f"fw_M{M_FR}": CURVES["fw"] + f", first {M_FR} members",
+                "fr": CURVES["fr"] + f", M {M_FR}"}
+    style_d = dict(CURVE_STYLE, **{f"fw_M{M_FR}": dict(color="0.55", marker="o", mfc="white", ls="--")})
+    for curve, lab in curves_d.items():
         q = Sm[(Sm["curve"] == curve) & (Sm["alpha"] == "pooled")].sort_values("p")
         if not len(q):
             continue
-        st = CURVE_STYLE[curve]
+        st = style_d[curve]
         for ax, k in ((ax_d1, "share_true"), (ax_d2, "alpha_err")):
             ax.errorbar(q["p"], q[k], yerr=[q[k] - q[k + "_lo"], q[k + "_hi"] - q[k]], ms=3, lw=1, capsize=1.5,
                         label=lab, **st)
