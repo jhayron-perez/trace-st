@@ -16,7 +16,7 @@ Metrics (N5_T3.per_config): share of trajectory density per class, alpha recover
 error, completion, link-level selection per class (TST_LINKSTATS). Means over configs, 95 % bootstrap CIs
 (10,000 resamples of configs, seed 0; alphas pooled unless split).
 
-python N6_T4_synthetic.py   (PBS only) -> night6/analysis/T4syn_*.csv, figures_v6/synthetic/S10_synthetic_extension.*
+python N6_T4_synthetic.py [--complete-only]   (PBS only) -> night6/analysis/T4syn_*.csv, figures_v6/synthetic/S10_synthetic_extension.*
 """
 from __future__ import annotations
 
@@ -209,6 +209,13 @@ def main():
                     print(f"bundle check fr p={p}: max |share_true diff| "
                           f"{(dev.share_true - dev.share_true_run).abs().max():.2e}")
                 msub += summarize(f"{curve}_M{M_FR}", p, bm); store[(f"{curve}_M{M_FR}", p)] = bm
+    if "--complete-only" in sys.argv[1:]:   # draft: only (curve, p) runs with all 50 configs x both alphas
+        keep = {k for k, g in store.items() if g.groupby("trial_id")["alpha"].nunique().eq(2).sum() == 50}
+        store = {k: g for k, g in store.items() if k in keep}
+        summ = [r for r in summ if (r["curve"], r["p"]) in keep]; msub = [r for r in msub if (r["curve"], r["p"]) in keep]
+        links = [r for r in links if (r["curve"], r["p"]) in keep]
+        rows = [g for g in rows if (g["curve"].iloc[0], g["p"].iloc[0]) in keep]
+        print("complete-only:", sorted(keep))
     if not rows:
         return
     # configs with both alphas at every p of both curves (partial runs drop the slow configs; compare on these)
