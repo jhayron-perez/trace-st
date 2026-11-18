@@ -635,8 +635,10 @@ def windowed_stats(src, n, max_lag=60, max_windows=60):
 
 
 def load_module(path):
+    """Import a module from a file path, registered in sys.modules (its functions must pickle for its Pool)."""
     spec = importlib.util.spec_from_file_location(Path(path).stem, path)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
