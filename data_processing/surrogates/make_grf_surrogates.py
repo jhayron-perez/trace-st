@@ -28,6 +28,14 @@ Usage (compute node only):
 Outputs: OUT/<case>/calibration.json, draw<NN>/ files (+ symlinks to the real extra inputs where the
 loader needs one directory), surrogate_stats.csv, seeds.csv, loader_check.json, sha256.txt,
 OUT/validation_<case>.csv/.md.
+
+Night 6 (opt-in, --spec night6 [--mode exp1|exp2|both] [--draws 20] [--draws2 5] [--k2 32]): final variable sets;
+per-cell variance map, pooled lag-1 autocorrelation and e-folding lengths estimated over the anomaly-computation
+period (Debby JAS 2006 for the ERA5 fields, the 432-h files for Tb and precip; PNW the full record; Pinatubo the
+whole 1991 file); stationary x_t = sd(cell) * AR(1) GRF with the per-time domain mean removed, over the loader's
+time axis; (phi, s_lat, s_lon, c) calibrated on realizations as long as the statistics period, validated on
+independent ones. exp1: OUT/<case>/exp1/<type>/drawNN/ (one surrogate S01<type>); exp2: OUT/<case>/exp2/drawNN/
+(slots 1..32, round-robin over CASES6[case]["exp2_types"]). Seeds: surrogate_seed6 (BASE_SEED6 = 20261117).
 """
 import argparse
 import hashlib
@@ -100,12 +108,14 @@ def _efold(z, axis, max_lag):
     return np.nan
 
 
-def field_stats(x, tmask=None, cellmask=None, max_lag=60, remove_common=True, max_frames=60):
+def field_stats(x, tmask=None, cellmask=None, max_lag=60, remove_common=True, max_frames=60, censor=False):
     """Statistics of x (nt, ny, nx) over the time window tmask: variance (cell mean of per-cell variance over
     cellmask), pooled lag-1 autocorrelation r1 of the per-cell standardized anomalies, tau = -1/ln r1, and the
     e-folding lengths L_lat, L_lon (cells) of their spatial lag correlation after removing, at each time, the
     domain mean (remove_common: the window's common trend would otherwise correlate all cells). The spatial
-    lengths use every k-th time of the window so that at most max_frames frames enter (Debby: 361 -> 61)."""
+    lengths use every k-th time of the window so that at most max_frames frames enter (Debby: 361 -> 61).
+    censor (night 6, opt-in): an e-folding not reached within max_lag is reported as max_lag (censored) instead of
+    nan, so that means over realizations stay defined when some of them do not e-fold."""
     w = np.asarray(x if tmask is None else x[np.asarray(tmask)], dtype=np.float64)
     mu = np.nanmean(w, axis=0)
     sd = np.nanstd(w, axis=0)
@@ -120,8 +130,10 @@ def field_stats(x, tmask=None, cellmask=None, max_lag=60, remove_common=True, ma
     z = z[::int(np.ceil(z.shape[0] / max_frames))]
     if remove_common:
         z = z - np.nanmean(z, axis=(1, 2), keepdims=True)
-    return dict(var=float(np.nanmean(var_map[cellmask])), r1=r1, tau=tau,
-                L_lat=_efold(z, 1, max_lag), L_lon=_efold(z, 2, max_lag)), var_map
+    L = [_efold(z, 1, max_lag), _efold(z, 2, max_lag)]
+    if censor:
+        L = [float(max_lag) if not np.isfinite(v) else v for v in L]
+    return dict(var=float(np.nanmean(var_map[cellmask])), r1=r1, tau=tau, L_lat=L[0], L_lon=L[1]), var_map
 
 
 def standardize_time(x):
@@ -150,9 +162,11 @@ def scale_field(u, tmask, var_map_w, sd_out, c, restandardize, apply_std=True):
 
 
 def calibrate(target, shape, tmask, var_map_w, sd_out, cellmask, seed, periodic_lon, restandardize,
-              max_iter=12, max_lag=60, n_real=1, damp=0.7, log=print):
+              max_iter=12, max_lag=60, n_real=1, damp=0.7, log=print, field_fn=None, censor=False):
     """Fixed-point calibration of (phi, s_lat, s_lon, c) so the measured stats (mean over n_real calibration
-    realizations, seeds seed + 7919 j) match target within TOL_CALIB; returns the best iterate."""
+    realizations, seeds seed + 7919 j) match target within TOL_CALIB; returns the best iterate.
+    field_fn(u, c) (night 6, opt-in): the field as the case sees it from the unit field u (default: scale_field).
+    censor (night 6, opt-in): field_stats(censor=True) for the measured statistics."""
     phi = float(np.clip(target["r1"], 0.0, 0.999))
     s_lat = max(0.5 * target["L_lat"], 0.05) if np.isfinite(target["L_lat"]) else 0.5 * max_lag
     s_lon = max(0.5 * target["L_lon"], 0.05) if np.isfinite(target["L_lon"]) else 0.5 * max_lag
@@ -168,8 +182,9 @@ def calibrate(target, shape, tmask, var_map_w, sd_out, cellmask, seed, periodic_
         for j in range(n_real):
             u = unit_grf_ar1(*shape, phi, s_lat, s_lon, np.random.default_rng(seed + 7919 * j),
                              periodic_lon=periodic_lon, pad=pad)
-            ms.append(field_stats(scale_field(u, tmask, var_map_w, sd_out, c, restandardize), tmask, cellmask,
-                                  max_lag)[0])
+            x = scale_field(u, tmask, var_map_w, sd_out, c, restandardize) if field_fn is None else field_fn(u, c)
+            ms.append(field_stats(x, tmask, cellmask, max_lag, censor=censor)[0])
+            del x
             del u
         m = {k: float(np.mean([d[k] for d in ms])) for k in ms[0]}
         err = {k: stat_err(k, m[k], target[k]) for k in ("var", "r1", "L_lat", "L_lon")}
@@ -252,6 +267,11 @@ PIN_EXTRAS = ["TMSO203", "BURDENSO403", "FLUT", "T050", "FSDS"]
 PNW_JOINT = SCRATCH / "JointFiles"
 PNW_IN5 = SCRATCH / "revision1/night5/inputs_pnw"
 PNW_EXTRAS = ["t2m", "blh"]
+# night 6 (opt-in, --spec night6): final variable sets (WS10, FLUT, FSDS, blh dropped)
+DEBBY_EXTRAS6 = [e for e in DEBBY_EXTRAS if e[0] != "WS10"]
+PIN_EXTRAS6 = ["TMSO203", "BURDENSO403", "T050"]
+PNW_EXTRAS6 = ["t2m"]
+EXTRAS = {"night5": (DEBBY_EXTRAS, PIN_EXTRAS, PNW_EXTRAS), "night6": (DEBBY_EXTRAS6, PIN_EXTRAS6, PNW_EXTRAS6)}
 
 CASES = {
     "debby": dict(script="5_DebbyRuns.py", space="SEARCH_SPACE_SHARED_DEBBY",
@@ -269,15 +289,17 @@ def surrogate_name(case, slot, vtype):
     return f"s{slot:02d}{clean.lower()}" if case == "pnw" else f"S{slot:02d}{clean}"
 
 
-def build_case(case, surrogates=None, drawdir=None):
-    """Case dict from the run script's own builder (extended set [+ surrogates of one draw])."""
+def build_case(case, surrogates=None, drawdir=None, spec="night5"):
+    """Case dict from the run script's own builder (extended set [+ surrogates of one draw]).
+    spec="night6" (opt-in): the final-set extras (DEBBY_EXTRAS6, PIN_EXTRAS6, PNW_EXTRAS6)."""
+    deb_ex, pin_ex, pnw_ex = EXTRAS[spec]
     m = load_script(CASES[case]["script"])
     names = [n for n, _ in (surrogates or [])]
     if case == "debby":
-        extra = DEBBY_EXTRAS + [(n, str(Path(drawdir) / f"{n}.nc"), n) for n in names]
+        extra = deb_ex + [(n, str(Path(drawdir) / f"{n}.nc"), n) for n in names]
         c = m.build_case_debby(extra_inputs=extra, vo_input=DEBBY_VO)
     elif case == "pinatubo":
-        os.environ["TST_PINATUBO_EXTRA"] = ",".join(PIN_EXTRAS + names)
+        os.environ["TST_PINATUBO_EXTRA"] = ",".join(pin_ex + names)
         if drawdir is not None:
             os.environ["TST_PINATUBO_EXTRA_PATH"] = str(drawdir)
         try:
@@ -286,7 +308,7 @@ def build_case(case, surrogates=None, drawdir=None):
             os.environ.pop("TST_PINATUBO_EXTRA", None)
             os.environ.pop("TST_PINATUBO_EXTRA_PATH", None)
     else:
-        c = m.build_case_pnw(extra_vars=PNW_EXTRAS + names, extra_path=str(drawdir or PNW_IN5))
+        c = m.build_case_pnw(extra_vars=pnw_ex + names, extra_path=str(drawdir or PNW_IN5))
     return m, c
 
 
@@ -383,12 +405,14 @@ def file_name(case, name):
     return f"{name}_daily_anoms.nc"
 
 
-def link_real_extras(case, drawdir):
-    """Pinatubo/PNW read every extra variable from one directory: link the real extended-set extras."""
+def link_real_extras(case, drawdir, spec="night5"):
+    """Pinatubo/PNW read every extra variable from one directory: link the real extended-set extras
+    (spec="night6": the final-set extras)."""
+    _, pin_ex, pnw_ex = EXTRAS[spec]
     if case == "pinatubo":
-        srcs = [PIN_SPA / f"{v}_199101_199112.nc" for v in PIN_EXTRAS]
+        srcs = [PIN_SPA / f"{v}_199101_199112.nc" for v in pin_ex]
     elif case == "pnw":
-        srcs = [PNW_IN5 / f"{v}_daily_anoms.nc" for v in PNW_EXTRAS]
+        srcs = [PNW_IN5 / f"{v}_daily_anoms.nc" for v in pnw_ex]
     else:
         return
     for s in srcs:
@@ -557,6 +581,415 @@ def validation_table(case, st, outdir, calib):
     return t
 
 
+# -----------------------------------------------------------------------------
+# Night 6 (opt-in: --spec night6). Stationary AR(1) GRF matched to the statistics of the anomaly-computation
+# period (Debby JAS 2006 where the files allow it, PNW full record, Pinatubo the whole 1991 file), per-time
+# domain mean removed; experiment 1 (one surrogate of v per draw) and experiment 2 (ordered 32-slot sequences).
+# -----------------------------------------------------------------------------
+BASE_SEED6 = 20261117
+EXP_IDX6 = {"exp1": 1, "exp2": 2, "val": 8, "calib": 9}
+K2_MAX = 32
+CASES6 = {
+    "debby": dict(types=["vo", "Tb", "precip", "CAPE", "DIV200", "MSLP"],
+                  exp2_types=["vo", "Tb", "precip", "CAPE", "DIV200", "MSLP"], restandardize=False, n_real=2),
+    "pinatubo": dict(types=["TMSO201", "BURDENSO401", "AEROD_v", "TMH2SO401"] + PIN_EXTRAS6,
+                     exp2_types=list(PIN_EXTRAS6), restandardize=True, n_real=20),
+    "pnw": dict(types=["z500", "tcwv", "olr", "slhf", "sshf", "z10", "t2m"],
+                exp2_types=["z500", "tcwv", "olr", "slhf", "sshf", "z10", "t2m"], restandardize=False, n_real=2),
+}
+# Debby ERA5 fields rebuilt over the whole JAS 2006 with the input builder's own preprocessing
+# (data_processing/era5_debby/make_debby_extra_inputs.py: per-cell, per-hour standardization over JAS 2006).
+# Tb and precip exist only as the 432-h FilesDebby anomaly files (their preprocessing is not on Derecho).
+DEBBY_JAS6 = {"vo": "vo500700", "CAPE": "cape", "DIV200": "d200", "MSLP": "msl"}
+DEBBY_CACHE = DEB_IN / "cache"
+
+
+def surrogate_seed6(case, exp, draw, slot):
+    """Night-6 seed: BASE_SEED6 + 1e6 case_idx + 1e4 exp (exp1 1, exp2 2, validation 8, calibration 9)
+    + 100 draw + slot. exp1: slot = 1-based type index; exp2: slot 1..32; validation: draw = realization."""
+    return int(BASE_SEED6 + 1000000 * CASE_IDX[case] + 10000 * EXP_IDX6[exp] + 100 * int(draw) + int(slot))
+
+
+def remove_domain_mean(x):
+    """Per-time domain mean (over the analysis grid cells) removed."""
+    return (x - np.nanmean(x, axis=(1, 2), keepdims=True, dtype=np.float64)).astype(np.float32)
+
+
+def field6(u, sd_map, c, restandardize):
+    """Night-6 field from the unit AR(1) GRF u (nt, ny, nx): x = sqrt(c) sd(cell) u, per-time domain mean
+    removed (stationary: one sd map for every time). Returns (values written to the file, values the case sees:
+    restandardize = Pinatubo loader (x - mean_time) / std_time per cell)."""
+    x = remove_domain_mean(u * (np.sqrt(c) * sd_map).astype(np.float32)[None])
+    return x, (standardize_time(x) if restandardize else x)
+
+
+def windowed_stats(src, n, max_lag=60, max_windows=60):
+    """Mean of field_stats over non-overlapping windows of n steps of src (at most max_windows, evenly spread):
+    what one file of n steps is expected to measure. Returns (stats, number of windows)."""
+    nw = src.shape[0] // n
+    if nw <= 1:
+        return field_stats(src, None, None, max_lag, censor=True)[0], 1
+    starts = np.unique(np.round(np.linspace(0, nw - 1, min(nw, max_windows))).astype(int)) * n
+    ss = [field_stats(src[s:s + n], None, None, max_lag, censor=True)[0] for s in starts]
+    return {k: float(np.nanmean([d[k] for d in ss])) for k in ss[0]}, len(ss)
+
+
+def load_module(path):
+    spec = importlib.util.spec_from_file_location(Path(path).stem, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _as_analysis(da, name):
+    """One loader-preprocessed field (dims incl. lat, lon, time; optional var) -> analysis arrangement."""
+    if "var" not in da.dims:
+        da = da.expand_dims(var=[name])
+    fd, _ = analysis_arrays(da)
+    return fd.isel(var=0)
+
+
+def stats_period_source(case, m, vt, fd, log=print):
+    """Source field (time, lat, lon) over the anomaly-computation period, on the analysis grid, with the case
+    loader's preprocessing; returns (array float32, period dict)."""
+    an = analysis_var_name(m, case, vt)
+    if case == "pnw":
+        ts0 = m.TIME_SLICE
+        m.TIME_SLICE = None                     # whole record of the anomaly files (statistics only)
+        try:
+            if vt in m.VAR_NAME_MAP:
+                da = m.load_full_data_for_vars([vt])
+            else:
+                da = m.tst.data_io.load_full_data(path_files=str(PNW_IN5), varstems=[vt], list_names_vars=[an],
+                                                  time_slice=None, join="inner")
+        finally:
+            m.TIME_SLICE = ts0
+        da = _as_analysis(m.regrid_to_2p5(da), an)
+        how = "full record of the anomaly file (loader TIME_SLICE overridden to None; loader regrid)"
+    elif case == "debby" and vt in DEBBY_JAS6:
+        mk = load_module(REPO / "data_processing/era5_debby/make_debby_extra_inputs.py")
+        field = DEBBY_JAS6[vt]
+        s = mk.SPEC[field]
+        probe = DEBBY_CACHE / (f"{s['code']}_20060701.nc" if s["kind"] == "pl" else f"{s['code']}_200607.nc")
+        cache = DEBBY_CACHE if probe.exists() else None
+        log(f"  [{vt}] JAS 2006 {field} from {'cache ' + str(cache) if cache else 'RDA ds633.0'}")
+        da = mk.standardize(mk.load_jas(field, 2006, nproc=3, cache=cache), "hour")
+        da = da.drop_vars([k for k in da.coords if k not in ("time", "latitude", "longitude")]).astype("float32")
+        da = da.rename({"latitude": "lat", "longitude": "lon"})
+        da = da.assign_coords(time=da.time.dt.round("1H"))
+        da = da.assign_coords(lon=(da.lon % 360)).sortby("lon")
+        da = _as_analysis(da, an)
+        how = f"JAS 2006 rebuilt with make_debby_extra_inputs.build preprocessing (field {field}, stdz hour)"
+    else:
+        da = fd.sel(var=an)
+        how = "whole period read by the case loader"
+    t = pd.to_datetime(da.time.values)
+    x = np.asarray(da.transpose("time", "lat", "lon").values, dtype=np.float32)
+    if x.shape[1:] != (fd.sizes["lat"], fd.sizes["lon"]) or not (
+            np.allclose(da.lat.values, fd.lat.values) and np.allclose(da.lon.values % 360, fd.lon.values % 360)):
+        raise ValueError(f"{case} {vt}: statistics-period grid differs from the analysis grid")
+    period = dict(start=str(t[0]), end=str(t[-1]), n_time=int(len(t)), how=how)
+    if how.startswith("JAS") or case == "pnw":   # check: the loader's field equals the period field on its times
+        idx = pd.DatetimeIndex(t).get_indexer(pd.to_datetime(fd.time.values))
+        ok = idx >= 0
+        ref = np.asarray(fd.sel(var=an).transpose("time", "lat", "lon").values, dtype=np.float32)[ok]
+        period["loader_times_found"] = int(ok.sum())
+        period["max_abs_diff_vs_loader"] = float(np.nanmax(np.abs(x[idx[ok]] - ref)))
+    return x, period
+
+
+def _same_stats(a, b):
+    """Cached calibration still valid: same target statistics (nan == nan)."""
+    return bool(a) and set(a) == set(b) and all(np.isclose(float(a[k]), float(b[k]), rtol=1e-9, equal_nan=True)
+                                                 for k in b)
+
+
+def _calib_task6(task):
+    ti, vt, nt = task
+    g = _G
+    tgt = g["src"][vt]["target"]
+    seed = surrogate_seed6(g["case"], "calib", 0, ti + 1)
+    ll = np.sqrt(np.nan_to_num(tgt["L_lat"], nan=g["max_lag"]) * np.nan_to_num(tgt["L_lon"], nan=g["max_lag"]))
+    n_real = int(np.clip(np.ceil(g["n_real"] * ll / 10.0), g["n_real"], max(g["n_real"], 6)))
+    sd, rs = g["sd"][vt], g["restandardize"]
+    log = lambda s: print(f"[{vt}] {s}", flush=True)
+    log(f"calibrate (seed {seed} + 7919 j, {n_real} realizations of {nt} steps): target {tgt}")
+    params, hist = calibrate(tgt, (nt,) + g["yx"], np.ones(nt, bool), None, None, g["cellmask"][vt], seed,
+                             g["periodic"], rs, max_lag=g["max_lag"], n_real=n_real, log=log, censor=True,
+                             field_fn=lambda u, c: field6(u, sd, c, rs)[1])
+    return vt, dict(params=params, seed=seed, seed_formula="surrogate_seed6(case, 'calib', 0, type_idx) + 7919 j",
+                    n_real=n_real, history=hist)
+
+
+def _val_task6(task):
+    ti, vt, nt, j = task
+    g = _G
+    p = g["calib"][vt]["params"]
+    seed = surrogate_seed6(g["case"], "val", j, ti + 1)
+    u = unit_grf_ar1(nt, *g["yx"], p["phi"], p["s_lat"], p["s_lon"], np.random.default_rng(seed),
+                     periodic_lon=g["periodic"], pad=(p["pad_lat"], p["pad_lon"]))
+    xs = field6(u, g["sd"][vt], p["c"], g["restandardize"])[1]
+    m, _ = field_stats(xs, None, g["cellmask"][vt], g["max_lag"], censor=True)
+    return dict(source=vt, realization=j, seed=seed, n_time=nt, **{f"sur_{k}": v for k, v in m.items()})
+
+
+def _gen_task6(task):
+    exp, draw, slot, vt, ti = task
+    g = _G
+    case = g["case"]
+    p = g["calib"][vt]["params"]
+    if exp == "exp1":
+        name, seed = surrogate_name(case, 1, vt), surrogate_seed6(case, "exp1", draw, ti + 1)
+        d = Path(g["outcase"]) / "exp1" / vt / f"draw{draw:02d}"
+    else:
+        name, seed = surrogate_name(case, slot, vt), surrogate_seed6(case, "exp2", draw, slot)
+        d = Path(g["outcase"]) / "exp2" / f"draw{draw:02d}"
+    t0 = time.time()
+    u = unit_grf_ar1(*g["shape"], p["phi"], p["s_lat"], p["s_lon"], np.random.default_rng(seed),
+                     periodic_lon=g["periodic"], pad=(p["pad_lat"], p["pad_lon"]))
+    x, _ = field6(u, g["sd"][vt], p["c"], g["restandardize"])
+    del u
+    q, scale = quantize(x)
+    xq = q.astype(np.float32) * scale                                       # values read back from the file
+    xs = standardize_time(xq) if g["restandardize"] else xq                 # as the case sees them
+    ma, _ = field_stats(xs, None, g["cellmask"][vt], g["max_lag"], censor=True)  # whole loader time axis
+    mw, _ = field_stats(xs, g["tmask"], g["cellmask"][vt], g["max_lag"], censor=True)  # analysis window (N samples)
+    dm = float(np.max(np.abs(np.mean(xs, axis=(1, 2), dtype=np.float64))))
+    path = d / file_name(case, name)
+    write_surrogate(path, name, xq, g["lay"],
+                    dict(long_name=f"GRF surrogate of {vt} (TraCE-ST revision-1 night 6 {exp})", source_variable=vt,
+                         seed=seed, phi=p["phi"], s_lat_cells=p["s_lat"], s_lon_cells=p["s_lon"],
+                         variance_factor=p["c"], stationary=1, domain_mean_removed=1,
+                         generator="data_processing/surrogates/make_grf_surrogates.py --spec night6"))
+    row = dict(case=case, exp=exp, draw=draw, slot=slot, name=name, source=vt, seed=seed, file=str(path),
+               bytes=path.stat().st_size, sha256=sha256(path), secs=round(time.time() - t0, 1),
+               max_abs_domain_mean=dm, **{f"sur_{k}": v for k, v in ma.items()},
+               **{f"win_{k}": v for k, v in mw.items()})
+    if (exp, draw, vt if exp == "exp1" else None) in g["keep"]:
+        np.save(d / f".{name}_analysis.npy", xs)
+    return row
+
+
+def run_args6(case, out, exp, draw, vtype=None, k=0):
+    """Data arguments a run script needs: final set + the exp1 surrogate of vtype (draw) or exp2 slots 1..k."""
+    out = Path(out)
+    if exp == "exp1":
+        d = out / "exp1" / vtype / f"draw{draw:02d}"
+        names = [surrogate_name(case, 1, vtype)]
+    else:
+        d = out / "exp2" / f"draw{draw:02d}"
+        names = [surrogate_name(case, s, type_for_slot(CASES6[case]["exp2_types"], s)) for s in range(1, k + 1)]
+    if case == "debby":
+        ex = DEBBY_EXTRAS6 + [(n, str(d / f"{n}.nc"), n) for n in names]
+        return (f"--vo-input {DEBBY_VO[0]}:{DEBBY_VO[1]} --extra-inputs "
+                + " ".join(f"{a}={p}:{v}" for a, p, v in ex))
+    if case == "pinatubo":
+        return "--extra-vars " + " ".join(PIN_EXTRAS6 + names) + (f" --extra-path {d}" if names else "")
+    return "--extra-vars " + " ".join(PNW_EXTRAS6 + names) + f" --extra-path {d if names else PNW_IN5}"
+
+
+def loader_check6(case, drawdir, sur, log=print):
+    """The run script's own loader reads drawdir (final set + surrogates sur [(name, type)]): same values as
+    generated (hidden .<name>_analysis.npy written by _gen_task6, removed afterwards)."""
+    m, c = build_case(case, sur, drawdir, spec="night6")
+    fd, _ = analysis_arrays(c["full_data"])
+    res = dict(case=case, dir=str(drawdir), var_names=list(map(str, c["var_names"])), n_vars=len(c["var_names"]),
+               nan_frac={}, max_abs_diff={})
+    for n, _ in sur:
+        an = n.upper() if case == "pnw" else n
+        got = np.asarray(fd.sel(var=an).values, dtype=np.float64)
+        ref = np.load(Path(drawdir) / f".{n}_analysis.npy").astype(np.float64)
+        res["nan_frac"][an] = float(np.isnan(got).mean())
+        res["max_abs_diff"][an] = float(np.nanmax(np.abs(got - ref)))
+        (Path(drawdir) / f".{n}_analysis.npy").unlink()
+    res["ok"] = bool(max(res["max_abs_diff"].values()) < 1e-3 and max(res["nan_frac"].values()) == 0.0)
+    log(f"[{case}] loader check {drawdir}: ok={res['ok']} max|diff|={max(res['max_abs_diff'].values()):.2e} "
+        f"n_vars={res['n_vars']}")
+    return res
+
+
+def validation_table6(case, src, val, st, outdir, calib):
+    """S20 rows per type: source (anomaly period) vs independent validation realizations of the same length
+    (pass: mean within TOL_PASS for var, r1, L_lat, L_lon); per-file check vs the source's expected per-file value
+    (windowed_stats over the loader time axis); matched-window source statistics (analysis window, information)."""
+    keys = ("var", "r1", "tau", "L_lat", "L_lon")
+    rows = []
+    for vt, info in src.items():
+        g = val[val.source == vt]
+        r = dict(case=case, source=vt, period=f"{info['period']['start']}..{info['period']['end']}",
+                 n_time=info["period"]["n_time"], n_val=len(g), **{k: calib[vt]["params"][k] for k in
+                                                                     ("phi", "s_lat", "s_lon", "c")})
+        ok = True
+        for k in keys:
+            s = float(info["target"][k])
+            e_ind = np.array([stat_err(k, v, s) for v in g[f"sur_{k}"]], dtype=float)
+            e_ind = np.where(np.isfinite(e_ind), e_ind, np.inf)
+            sur = float(np.nanmean(g[f"sur_{k}"])) if np.isfinite(g[f"sur_{k}"]).any() else np.nan
+            r.update({f"{k}_src": s, f"{k}_sur": sur, f"{k}_relerr": stat_err(k, sur, s),
+                      f"{k}_maxabs_relerr": float(np.abs(e_ind).max())})
+            if k != "tau":
+                ok &= bool(np.isfinite(r[f"{k}_relerr"]) and abs(r[f"{k}_relerr"]) <= TOL_PASS)
+        r["pass"] = ok
+        if st is not None:
+            f = st[st.source == vt]
+            okf = True
+            for k in keys:
+                s = float(info["target_fileaxis"][k])
+                e_ind = np.array([stat_err(k, v, s) for v in f[f"sur_{k}"]], dtype=float)
+                sur = float(np.nanmean(f[f"sur_{k}"])) if np.isfinite(f[f"sur_{k}"]).any() else np.nan
+                r.update({f"file_{k}_src": s, f"file_{k}_sur": sur, f"file_{k}_relerr": stat_err(k, sur, s),
+                          f"file_{k}_maxabs_relerr": float(np.nanmax(np.abs(e_ind))) if len(e_ind) else np.nan})
+                if k != "tau":
+                    okf &= bool(np.isfinite(r[f"file_{k}_relerr"]) and abs(r[f"file_{k}_relerr"]) <= TOL_PASS)
+            r["n_files"], r["file_pass"] = len(f), okf
+        for k in keys:
+            r[f"window_{k}_src"] = float(info["target_window"][k])
+        rows.append(r)
+    t = pd.DataFrame(rows)
+    t.to_csv(outdir / f"validation_{case}.csv", index=False)
+    pct = lambda v: f"{100 * v:+.1f}%" if np.isfinite(v) else "nan"
+    lines = [f"### {case} (night 6: statistics over the anomaly-computation period; stationary AR(1) GRF, "
+             f"per-time domain mean removed)", "",
+             "Source = statistics over the period; surrogate = mean of independent validation realizations of the "
+             "same length (pass: |mean rel. err| <= 10 % for var, r1, L_lat, L_lon). Files = production files over "
+             "the loader time axis vs the source's mean over windows of that length (information only: the source "
+             "is not stationary, so short windows of it are not realizations of one AR(1) process). L not reached "
+             "within max_lag is censored at max_lag.", "",
+             "| type | period (n) | var src/sur | r1 src/sur | tau src/sur | L_lat src/sur | L_lon src/sur "
+             "| max ind. err var/r1/Llat/Llon | pass | files: mean err var/r1/Llat/Llon (n) | files within 10 % (info) "
+             "| matched window src var/r1/Llat/Llon |",
+             "|" + "---|" * 12]
+    for _, r in t.iterrows():
+        cells = [r.source, f"{r.period} ({r.n_time})"]
+        cells += [f"{r[f'{k}_src']:.4g} / {r[f'{k}_sur']:.4g}" for k in keys]
+        cells.append("/".join(f"{100 * r[f'{k}_maxabs_relerr']:.1f}%" for k in ("var", "r1", "L_lat", "L_lon")))
+        cells.append("yes" if r["pass"] else "NO")
+        if "file_pass" in t.columns and pd.notna(r.get("file_pass")):
+            cells.append("/".join(pct(r[f"file_{k}_relerr"]) for k in ("var", "r1", "L_lat", "L_lon"))
+                         + f" ({int(r.n_files)})")
+            cells.append("yes" if r["file_pass"] else "NO")
+        else:
+            cells += ["-", "-"]
+        cells.append("/".join(f"{r[f'window_{k}_src']:.3g}" for k in ("var", "r1", "L_lat", "L_lon")))
+        lines.append("| " + " | ".join(map(str, cells)) + " |")
+    (outdir / f"validation_{case}.md").write_text("\n".join(lines) + "\n")
+    return t
+
+
+def run_case6(case, outdir, mode, draws1, draws2, k2, nproc, n_val=3, max_lag=60, log=print):
+    cfg = CASES6[case]
+    out = Path(outdir) / case
+    out.mkdir(parents=True, exist_ok=True)
+    log(f"[{case}] night 6: loading the final set via the run script's builder")
+    m, c = build_case(case, spec="night6")
+    fd, periodic = analysis_arrays(c["full_data"])
+    tmask, win = analysis_window(m, case, c, fd.time.values)
+    shape = (fd.sizes["time"], fd.sizes["lat"], fd.sizes["lon"])
+    log(f"[{case}] analysis grid {shape}, periodic lon {periodic}, loader axis {fd.time.values[0]}..{fd.time.values[-1]}, "
+        f"window {win} ({int(tmask.sum())} steps), vars {list(map(str, c['var_names']))}")
+    calib_path = out / "calibration.json"
+    calib = json.loads(calib_path.read_text()) if calib_path.exists() else {}
+    calib.pop("_meta", None)
+    calib.pop("sources", None)
+    src, sd, cellmask, todo = {}, {}, {}, []
+    for ti, vt in enumerate(cfg["types"]):
+        t0 = time.time()
+        x, period = stats_period_source(case, m, vt, fd, log)
+        tgt, vmap = field_stats(x, None, None, max_lag, censor=True)
+        tgt_axis, n_w = windowed_stats(x, shape[0], max_lag)
+        cv = np.asarray(fd.sel(var=analysis_var_name(m, case, vt)).values, dtype=np.float32)
+        tgt_win = field_stats(cv, tmask, None, max_lag, censor=True)[0]
+        del x, cv
+        sd[vt] = np.sqrt(np.where(np.isfinite(vmap), vmap, 1.0)).astype(np.float32)
+        cellmask[vt] = np.isfinite(vmap)
+        src[vt] = dict(period=period, target=tgt, target_fileaxis=tgt_axis, n_fileaxis_windows=n_w,
+                       target_window=tgt_win)
+        log(f"[{case}] {vt}: period {period} ({time.time() - t0:.0f} s)\n    target {tgt}\n    file-axis {tgt_axis} "
+            f"({n_w} windows)\n    matched window {tgt_win}")
+        if vt not in calib or not _same_stats(calib[vt].get("target"), tgt):
+            todo.append((ti, vt, period["n_time"]))
+    meta = dict(spec="night6", window=win, shape=shape, periodic=periodic, loader_axis=[str(fd.time.values[0]),
+                str(fd.time.values[-1])], var_names=list(map(str, c["var_names"])))
+    _G.clear()
+    _G.update(case=case, src=src, sd=sd, cellmask=cellmask, yx=shape[1:], periodic=periodic, max_lag=max_lag,
+              restandardize=cfg["restandardize"], n_real=cfg["n_real"])
+    if todo:
+        log(f"[{case}] calibrating {[t[1] for t in todo]} with {min(nproc, len(todo))} processes")
+        with mp.get_context("fork").Pool(min(nproc, len(todo))) as pool:
+            for vt, res in pool.imap_unordered(_calib_task6, todo):
+                calib[vt] = dict(target=src[vt]["target"], **res)
+                calib_path.write_text(json.dumps(dict(calib, _meta=meta), indent=1, default=float))
+    calib_path.write_text(json.dumps(dict(calib, _meta=meta, sources=src), indent=1, default=float))
+    _G["calib"] = calib
+    vtasks = [(ti, vt, src[vt]["period"]["n_time"], j) for ti, vt in enumerate(cfg["types"]) for j in range(n_val)]
+    log(f"[{case}] {len(vtasks)} validation realizations")
+    with mp.get_context("fork").Pool(min(nproc, len(vtasks))) as pool:
+        val = pd.DataFrame(list(pool.imap_unordered(_val_task6, vtasks))).sort_values(["source", "realization"])
+    val.to_csv(out / "validation_realizations.csv", index=False)
+    vt_tab = validation_table6(case, src, val, None, Path(outdir), calib)
+    log(Path(outdir, f"validation_{case}.md").read_text())
+    if not vt_tab["pass"].all():
+        log(f"[{case}] VALIDATION FAILED for {list(vt_tab.source[~vt_tab['pass']])}: no production files written")
+        return None
+    lay = native_layout(case, dict(time=fd.time.values, lat=fd.lat.values, lon=fd.lon.values), periodic,
+                        time_slice=getattr(m, "TIME_SLICE", None) if case == "pnw" else None)
+    tasks, keep = [], set()
+    if mode in ("exp1", "both"):
+        for ti, vt in enumerate(cfg["types"]):
+            for d in draws1:
+                dd = out / "exp1" / vt / f"draw{d:02d}"
+                dd.mkdir(parents=True, exist_ok=True)
+                link_real_extras(case, dd, spec="night6")
+                tasks.append(("exp1", d, 1, vt, ti))
+        keep.add(("exp1", draws1[0], cfg["types"][0]))
+    if mode in ("exp2", "both"):
+        for d in draws2:
+            dd = out / "exp2" / f"draw{d:02d}"
+            dd.mkdir(parents=True, exist_ok=True)
+            link_real_extras(case, dd, spec="night6")
+            for s in range(1, k2 + 1):
+                vt = type_for_slot(cfg["exp2_types"], s)
+                tasks.append(("exp2", d, s, vt, cfg["types"].index(vt)))
+        keep.add(("exp2", draws2[0], None))
+    _G.update(shape=shape, tmask=tmask, outcase=str(out), lay=lay, keep=keep)
+    log(f"[{case}] generating {len(tasks)} surrogates with {nproc} processes")
+    del c, fd
+    rows = []
+    with mp.get_context("fork").Pool(nproc) as pool:
+        for i, r in enumerate(pool.imap_unordered(_gen_task6, tasks)):
+            rows.append(r)
+            if (i + 1) % 20 == 0:
+                log(f"  {i + 1}/{len(tasks)}")
+    st = pd.DataFrame(rows).sort_values(["exp", "source", "draw", "slot"])
+    st.to_csv(out / "surrogate_stats.csv", index=False)
+    st[["case", "exp", "draw", "slot", "name", "source", "seed"]].to_csv(out / "seeds.csv", index=False)
+    with open(out / "sha256.txt", "w") as f:
+        for _, r in st.iterrows():
+            f.write(f"{r.sha256}  {Path(r.file).relative_to(out)}\n")
+    checks = {}
+    if mode in ("exp1", "both"):
+        vt = cfg["types"][0]
+        checks["exp1"] = loader_check6(case, out / "exp1" / vt / f"draw{draws1[0]:02d}",
+                                       [(surrogate_name(case, 1, vt), vt)], log)
+    if mode in ("exp2", "both"):
+        sur = [(surrogate_name(case, s, type_for_slot(cfg["exp2_types"], s)), type_for_slot(cfg["exp2_types"], s))
+               for s in range(1, k2 + 1)]
+        checks["exp2"] = loader_check6(case, out / "exp2" / f"draw{draws2[0]:02d}", sur, log)
+    (out / "loader_check.json").write_text(json.dumps(checks, indent=1))
+    with open(out / "exp1_args.txt", "w") as f:
+        f.write("# type|draw|data arguments (final set + the exp1 surrogate of type, draw)\n")
+        for vt in cfg["types"]:
+            for d in draws1:
+                f.write(f"{vt}|{d}|{run_args6(case, out, 'exp1', d, vtype=vt)}\n")
+    with open(out / "exp2_args.txt", "w") as f:
+        f.write("# K|draw|data arguments (final set + exp2 slots 1..K of draw; K=0 = final set)\n")
+        for k in (0, 1, 2, 4, 8, 16, 24, 32):
+            for d in draws2:
+                f.write(f"{k}|{d}|{run_args6(case, out, 'exp2', d, k=k)}\n")
+    validation_table6(case, src, val, st, Path(outdir), calib)
+    return st, checks
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--case", required=True, choices=sorted(CASES))
@@ -565,8 +998,23 @@ def main():
     ap.add_argument("--k", type=int, default=16)
     ap.add_argument("--nproc", type=int, default=8)
     ap.add_argument("--max-lag", type=int, default=60)
+    ap.add_argument("--spec", choices=["night5", "night6"], default="night5",
+                    help="night6 (opt-in): stationary GRF from anomaly-period statistics, domain mean removed, final sets")
+    ap.add_argument("--mode", choices=["exp1", "exp2", "both"], default="both", help="night6: which experiment's files")
+    ap.add_argument("--draws2", type=int, default=5, help="night6: exp2 draws")
+    ap.add_argument("--k2", type=int, default=K2_MAX, help="night6: exp2 slots per draw")
+    ap.add_argument("--n-val", type=int, default=3, help="night6: validation realizations per type")
     a = ap.parse_args()
     t0 = time.time()
+    if a.spec == "night6":
+        res = run_case6(a.case, a.outdir, a.mode, list(range(a.draws)), list(range(a.draws2)), a.k2, a.nproc,
+                        a.n_val, a.max_lag, log=lambda s: print(s, flush=True))
+        if res is None:
+            sys.exit(3)
+        st, checks = res
+        print(f"[{a.case}] done: {len(st)} files, {st.bytes.sum() / 1e9:.2f} GB, loader checks "
+              f"{ {k: v['ok'] for k, v in checks.items()} }, {time.time() - t0:.0f} s", flush=True)
+        return
     st = run_case(a.case, a.outdir, list(range(a.draws)), a.k, a.nproc, a.max_lag,
                   log=lambda s: print(s, flush=True))
     print(f"[{a.case}] done: {len(st)} files, {st.bytes.sum() / 1e9:.2f} GB, {time.time() - t0:.0f} s", flush=True)
