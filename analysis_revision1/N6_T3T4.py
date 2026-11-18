@@ -229,9 +229,9 @@ def fig_s11(cases):
             a.errorbar(q["K"], q["share_renorm"], yerr=[q["share_renorm"] - q["lo_renorm"], q["hi_renorm"] - q["share_renorm"]],
                        color=S.col(v), lw=1.0 if v not in par else 1.6, marker="o", ms=2.5, capsize=1.5,
                        label=S.lab(v))
-        a.set_title(f"{CASE_TITLE[case]}, {pw[1:].replace('-', '–')} d", fontsize=7)
+        a.set_title(f"{CASE_TITLE[case]}, {pw[1:].replace('-', '–')} d", fontsize=7, pad=22)
         a.set_ylabel("share among real variables" if j == 0 else ""); a.set_xticks([0, 4, 8, 16, 24, 32])
-        a.legend(fontsize=5, ncol=2, frameon=False, loc="upper right")
+        a.legend(fontsize=5, ncol=4, frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.08))
         b = ax[1, j]
         q = g[g["var"] == "surrogates_total"].sort_values("K")
         b.errorbar(q["K"], q["share"], yerr=[q["share"] - q["lo"], q["hi"] - q["share"]], color="0.35", marker="s", ms=2.5,
