@@ -20,6 +20,7 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import sys
 import copy
+import contextlib
 import json
 import time
 import traceback
@@ -719,6 +720,87 @@ def run_ensemble(case, base_params, M=30, seed=123):
     return {"members": members, "params": copy.deepcopy(base_params), "M": M}
 
 
+# -----------------------------------------------------------------------------
+# revision-1 night 6 (opt-in --parallel-members): members of every (trial, alpha) run in one
+# process pool instead of one after another. Same member seeds and member body as run_ensemble
+# (unchanged above), so the ensembles are identical; only elapsed_sec differs. Pool processes
+# build the case per alpha_mix once (cache) from the same arguments as evaluate_trial_across_alphas_full.
+# -----------------------------------------------------------------------------
+_MEMBER_CASES = {}
+
+
+def member_seeds(M, seed):
+    rng_local = np.random.default_rng(seed)
+    return [int(rng_local.integers(0, 2_000_000_000)) for _ in range(M)]
+
+
+def run_member_task(tag, alpha_mix, extra_vars, base_params, m, member_seed):
+    key = float(alpha_mix)
+    if key not in _MEMBER_CASES:
+        _MEMBER_CASES[key] = build_multivariate_case(alpha_mix=key, T=40, N_inject=8, seed=GLOBAL_SEED, **dict(extra_vars or {}))
+    case = _MEMBER_CASES[key]
+    p = copy.deepcopy(base_params)
+    p["starting_lat"] = float(case["event"][0])
+    p["starting_lon"] = float(case["event"][1])
+
+    np.random.seed(member_seed)  # legacy global seed; does not seed default_rng
+    p["seed"] = member_seed  # seeds run_track cluster selection (revision-1)
+    t0 = time.perf_counter()
+
+    try:
+        centers, parents, out = run_one_track(case["full_data_run"], p, case["date_end"])
+        ok = True
+        err = ""
+    except Exception as e:
+        centers = np.empty((0, 2), dtype=float)
+        parents = np.empty((0,), dtype=int)
+        out = None
+        ok = False
+        err = str(e)
+
+    return tag, {
+        "member_id": m,
+        "ok": ok,
+        "error": err,
+        "elapsed_sec": time.perf_counter() - t0,
+        "centers": np.asarray(centers, dtype=float),
+        "parents": np.asarray(parents, dtype=int),
+        "out": out,
+    }
+
+
+def iter_trials_parallel_members(pending_jobs, n_workers, alpha_grid, M, seed, extra_vars, strength_mode, grouping, ctx):
+    """Yield one evaluate_trial_worker result per trial once all members of all its alphas are back."""
+    state = {}
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
+        futures = []
+        for trial_id, trial in pending_jobs:
+            params = build_params_from_trial_multivar(trial)   # as in evaluate_trial_across_alphas_full
+            if strength_mode != "native":
+                params["strength_mode"] = str(strength_mode)
+            if grouping != "dbscan":
+                params["grouping"] = str(grouping)
+            if STABILITY is not None:
+                params["cd_kwargs"]["stability"] = dict(STABILITY)
+            state[int(trial_id)] = dict(trial=trial, params=params, members={}, t0=time.perf_counter())
+            for j, alpha_mix in enumerate(alpha_grid):
+                for m, s in enumerate(member_seeds(M, int(seed + 1000 * trial_id + j))):
+                    futures.append(ex.submit(run_member_task, (int(trial_id), j), float(alpha_mix), extra_vars, params, m, s))
+        for fut in as_completed(futures):
+            (trial_id, j), member = fut.result()
+            st = state[trial_id]
+            st["members"][(j, member["member_id"])] = member
+            if len(st["members"]) < M * len(alpha_grid):
+                continue
+            ensembles = {j: {"members": [st["members"][(j, m)] for m in range(M)],
+                             "params": copy.deepcopy(st["params"]), "M": M} for j in range(len(alpha_grid))}
+            result = evaluate_trial_worker((trial_id, st["trial"]), alpha_grid, M, seed, extra_vars, strength_mode,
+                                           grouping, ensembles=ensembles)
+            result["trial_row"]["elapsed_sec"] = float(time.perf_counter() - st["t0"])
+            del state[trial_id]
+            yield result
+
+
 def build_params_from_trial_multivar(trial):
     p = build_base_params_multivar()
     for k in [
@@ -1349,7 +1431,8 @@ def save_ensemble_bundle(bundle, bundles_dir: Path):
 # Evaluate one configuration across all prescribed mixture strengths
 # -----------------------------------------------------------------------------
 def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
-                                      extra_vars=None, strength_mode="native", grouping="dbscan"):
+                                      extra_vars=None, strength_mode="native", grouping="dbscan", ensembles=None):
+    # ensembles: night 6 --parallel-members passes {alpha index: pooled ensemble} (default None = original)
     params = build_params_from_trial_multivar(trial)
     if strength_mode != "native":
         params["strength_mode"] = str(strength_mode)  # revision-1 opt-in (T9)
@@ -1372,12 +1455,15 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
             **extra_vars,
         )
 
-        ensemble_out = run_ensemble(
-            case,
-            params,
-            M=M,
-            seed=int(seed + 1000 * trial_id + j),
-        )
+        if ensembles is None:
+            ensemble_out = run_ensemble(
+                case,
+                params,
+                M=M,
+                seed=int(seed + 1000 * trial_id + j),
+            )
+        else:
+            ensemble_out = ensembles[j]
 
         summary = summarize_ensemble(case, ensemble_out, params)
         validity = evaluate_physical_validity(summary)
@@ -1489,7 +1575,7 @@ def evaluate_trial_across_alphas_full(trial_id, trial, alpha_grid=ALPHA_MIX_GRID
 # Multiprocessing wrapper for one hyperparameter configuration
 # -----------------------------------------------------------------------------
 def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED,
-                          extra_vars=None, strength_mode="native", grouping="dbscan"):
+                          extra_vars=None, strength_mode="native", grouping="dbscan", ensembles=None):
     trial_id, trial = job
     t0 = time.perf_counter()
 
@@ -1503,6 +1589,7 @@ def evaluate_trial_worker(job, alpha_grid=ALPHA_MIX_GRID, M=30, seed=SEARCH_SEED
             extra_vars=extra_vars,
             strength_mode=strength_mode,
             grouping=grouping,
+            ensembles=ensembles,
         )
 
         trial_row = out["trial_row"]
@@ -1635,6 +1722,9 @@ def parse_args():
                              "(W_p = 1 + round((W - 1) p / 3); see scale_timewindow_to_p3)")
     parser.add_argument("--t-pad", type=int, default=0,
                         help="night-6 T4: prepend this many days to the synthetic series (default 0 = original T = 40)")
+    parser.add_argument("--parallel-members", action="store_true",
+                        help="night 6 (opt-in): the --n-workers pool runs ensemble members of every (trial, alpha) "
+                             "(same seeds, same ensembles) instead of whole trials")
     return parser.parse_args()
 
 
@@ -1832,7 +1922,17 @@ def main():
 
     ctx = mp.get_context("spawn")
 
-    with ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx) as ex:
+    extra_vars_run = dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving,
+                          **({} if (args.n_decoy == 0 and not args.extra_mix) else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
+                                                                             decoy_sigma=args.decoy_sigma)),
+                          **n2kw)
+    if args.parallel_members:  # night 6 opt-in: pool over members (iter_trials_parallel_members owns its pool)
+        ex = contextlib.nullcontext()
+        results_iter = iter_trials_parallel_members(
+            pending_jobs, args.n_workers, (args.alpha_grid or ALPHA_MIX_GRID), args.ensemble_size, args.seed,
+            extra_vars_run, args.strength_mode, args.grouping, ctx)
+    else:
+        ex = ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx)
         futures = [
             ex.submit(
                 evaluate_trial_worker,
@@ -1840,18 +1940,16 @@ def main():
                 (args.alpha_grid or ALPHA_MIX_GRID),
                 args.ensemble_size,
                 args.seed,
-                dict(n_noise=args.n_noise, n_decoy=args.n_decoy, n_moving=args.n_moving,
-                     **({} if (args.n_decoy == 0 and not args.extra_mix) else dict(decoy_phi=args.decoy_phi, decoy_beta=args.decoy_beta,
-                                                          decoy_sigma=args.decoy_sigma)),
-                     **n2kw),
+                extra_vars_run,
                 args.strength_mode,
                 args.grouping,
             )
             for job in pending_jobs
         ]
+        results_iter = (fut.result() for fut in as_completed(futures))
 
-        for fut in as_completed(futures):
-            result = fut.result()
+    with ex:
+        for result in results_iter:
 
             trial_row = result["trial_row"]
             alpha_rows = result["alpha_rows"]
