@@ -123,9 +123,11 @@ def exp1(case, partial, nproc):
             for L, s in lead_shares(D).items():
                 lrows.append(dict(case=case, var=v, draw=int(draw), cfg=cfg, lead_day=L, share_v=s[iv],
                                   share_sur=s[js], excess=s[iv] - s[js]))
-    if not rows:
+    if not rows and case != "pinatubo":
         print(f"[{case}] exp1: no runs"); return None
-    X, XL, C = pd.DataFrame(rows), pd.DataFrame(lrows), pd.DataFrame(cnt)
+    X = pd.DataFrame(rows, columns=["case", "var", "draw", "cfg", "window", "share_v", "share_sur", "excess"])
+    XL = pd.DataFrame(lrows, columns=["case", "var", "draw", "cfg", "lead_day", "share_v", "share_sur", "excess"])
+    C = pd.DataFrame(cnt, columns=["case", "var", "draw", "n_configs", "n_retained"])
     X.to_csv(OUT / f"T3_{case}_long.csv.gz", index=False); XL.to_csv(OUT / f"T3_{case}_lead_long.csv.gz", index=False)
     C.to_csv(OUT / f"T3_{case}_counts.csv", index=False)
     res = []
@@ -158,10 +160,11 @@ def exp1(case, partial, nproc):
         band.append(dict(case=case, variable=v, lead_day=int(L), p05=p[0], p50=p[1], p95=p[2], n=len(g)))
         m, lo, hi = boot_pairs(g["excess"].to_numpy())
         lres.append(dict(case=case, var=v, lead_day=int(L), excess=m, lo=lo, hi=hi, above_null=bool(lo > 0), n_pairs=len(g)))
-    pd.DataFrame(band).to_csv(OUT / f"T3_nullband_{case}.csv", index=False)
+    if band:   # no surrogate runs (Pinatubo while its generator is stopped): no null band file
+        pd.DataFrame(band).to_csv(OUT / f"T3_nullband_{case}.csv", index=False)
     pd.DataFrame(lres).to_csv(OUT / f"T3_{case}_excess_by_lead.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_rows", 200):
-        print(R[["var", "window", "null", "n_pairs", "share_v", "share_sur", "sur_p95", "excess", "lo", "hi", "above_null"]].round(4).to_string())
+        print(R.reindex(columns=["var", "window", "null", "n_pairs", "share_v", "share_sur", "sur_p95", "excess", "lo", "hi", "above_null"]).round(4).to_string())
         print(C.groupby("var")[["n_configs", "n_retained"]].sum().to_string())
     return R
 
