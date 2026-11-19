@@ -217,5 +217,52 @@ class TestPinatuboExtraPath(unittest.TestCase):
             sys.argv = argv
 
 
+class TestLinklessSystem(unittest.TestCase):
+    """Night 7 (--spec night7): linkless systems with a prescribed lag-0 correlation matrix."""
+
+    PARAMS = [dict(phi=0.8, s_lat=2.0, s_lon=3.0, pad_lat=13, pad_lon=19),
+              dict(phi=0.5, s_lat=1.5, s_lon=2.5, pad_lat=10, pad_lon=16),
+              dict(phi=0.9, s_lat=3.0, s_lon=3.0, pad_lat=19, pad_lon=19)]
+
+    def test_seeds_disjoint_and_formula(self):
+        s = grf.surrogate_seed7("pnw", "A", 3, 2)
+        self.assertEqual(s, 20261118 + 1000000 * 1 + 10000 * 1 + 300 + 2)
+        self.assertNotEqual(grf.surrogate_seed7("pnw", "A", 3, 2), grf.surrogate_seed7("pnw", "addK", 3, 2))
+        self.assertNotEqual(grf.surrogate_seed7("pnw", "A", 3, 2), grf.surrogate_seed6("pnw", "exp1", 3, 2))
+
+    def test_nearest_corr_and_groups(self):
+        C = np.array([[1, 0.99, -0.99], [0.99, 1, 0.99], [-0.99, 0.99, 1.0]])
+        P = grf.nearest_corr7(C)
+        self.assertTrue(np.allclose(np.diag(P), 1.0))
+        self.assertGreater(np.linalg.eigvalsh(P).min(), 0)
+        R = np.eye(4)
+        R[0, 1] = R[1, 0] = 0.8
+        R[2, 3] = R[3, 2] = -0.75
+        self.assertEqual(grf.corr_groups7(R, list("abcd")), [["a", "b"], ["c", "d"]])
+        self.assertEqual(grf.corr_groups7(np.eye(2), ["x", "y"]), [["x"], ["y"]])
+
+    def test_independent_system_has_no_cross_correlation(self):
+        rngs = [np.random.default_rng(i) for i in range(3)]
+        us = grf.system_unit_fields7(300, (30, 40), self.PARAMS, np.eye(3), rngs)
+        R = grf.corr_matrix7([grf.zfield7(u, np.ones((30, 40), bool)) for u in us])
+        self.assertLess(np.abs(R[np.triu_indices(3, 1)]).max(), 0.08)
+        for u, p in zip(us, self.PARAMS):                       # marginals as the single-field generator
+            m, _ = grf.field_stats(u, remove_common=False)
+            self.assertLess(abs(m["r1"] / p["phi"] - 1), 0.10)
+
+    def test_mixing_calibration_reaches_target(self):
+        R = np.array([[1, 0.7, -0.3], [0.7, 1, 0.2], [-0.3, 0.2, 1.0]])
+        cfg7 = dict(case="pnw", n_rep=2, nt_cal=300, sd=[np.ones((30, 40), np.float32)] * 3, c=[1.0] * 3,
+                    restandardize=False, periodic=False, cmask=np.ones((30, 40), bool))
+        C, L, hist = grf.calibrate_mixing7(R, self.PARAMS, (30, 40), cfg7, log=lambda s: None, max_iter=6)
+        self.assertLess(hist[-1]["worst"] if len(hist) else 1, 0.10)
+        self.assertTrue(np.allclose(np.linalg.norm(L, axis=1), 1.0))
+        self.assertTrue(np.allclose(L, np.tril(L)))
+
+    def test_default_return_of_stats_period_source_unchanged(self):
+        import inspect
+        self.assertFalse(inspect.signature(grf.stats_period_source).parameters["return_times"].default)
+
+
 if __name__ == "__main__":
     unittest.main()
