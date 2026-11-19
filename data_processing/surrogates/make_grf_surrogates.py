@@ -1346,7 +1346,8 @@ def run_case7(case, outdir, variants, draws, draws_add, nproc, n_val=3, max_lag=
     cfg = CASES6[case]
     types = cfg["types"]
     V = len(types)
-    outroot = Path(outdir).parent if Path(outdir).name == "surrogates" else Path(outdir)
+    outdir = Path(outdir)
+    outroot = outdir.parent if outdir.name == "surrogates" else outdir
     out = Path(outdir) / case
     out.mkdir(parents=True, exist_ok=True)
     log(f"[{case}] night 7: loading the final set via the run script's builder")
@@ -1421,7 +1422,7 @@ def run_case7(case, outdir, variants, draws, draws_add, nproc, n_val=3, max_lag=
     c_list = [calib[vt]["params"]["c"] for vt in types]
     nR = int(n_common)
     nt_val = int(min(max(src[vt]["period"]["n_time"] for vt in types), nt_val_cap))
-    cfg7 = dict(case=case, n_rep={"debby": 2, "pinatubo": 10, "pnw": 2}[case], nt_cal=int(min(nR, 1000)), sd=sd_list,
+    cfg7 = dict(case=case, n_rep={"debby": 3, "pinatubo": 60, "pnw": 3}[case], nt_cal=int(min(nR, 1000)), sd=sd_list,
                 c=c_list, restandardize=cfg["restandardize"], periodic=periodic, cmask=cmask)
     L = {"indep": np.eye(V)}
     mix = {}
