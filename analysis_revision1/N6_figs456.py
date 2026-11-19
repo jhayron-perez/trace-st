@@ -221,15 +221,18 @@ def deco(ax, case, track=None, observed_x=False):
                transform=geo, zorder=10)
 
 
-def panel_shares(ax, case, L, vars_, roles, null, null_style):
+def panel_shares(ax, case, L, vars_, roles, null, null_style, band=None):
     x = L[(L["case"] == case) & (L["set"] == "final") & (L["cfgset"] == "own")]
+    if band is not None:   # night 7 (opt-in): smooth null band 0..u(t), same rule in all cases (lead_day, u)
+        b = band.sort_values("lead_day")
+        ax.fill_between(b["lead_day"], 0, b["u"], color="0.5", alpha=0.25, lw=0, zorder=1)
     for v in vars_:
         g = x[x["var"] == v].sort_values("lead")
         if not len(g):
             continue
         ax.fill_between(g["lead"], g["lo"], g["hi"], color=S.col(v), alpha=0.22, lw=0, zorder=3)
         ax.plot(g["lead"], g["share"], "-", color=S.col(v), lw=1.0, marker="o", ms=1.6, zorder=4)
-        if null is not None:
+        if null is not None and band is None:
             q = null[null["variable"] == v].sort_values("lead_day")
             if len(q) and null_style == "band":
                 ax.fill_between(q["lead_day"], q["p05"], q["p95"], color="0.5", alpha=0.12, lw=0, zorder=1)
@@ -257,7 +260,7 @@ def nice_vmax(H):
 
 
 # ------------------------------------------------------------------ figure
-def make_fig(case, cfg, D, L, null, null_style, root):
+def make_fig(case, cfg, D, L, null, null_style, root, band=None, suffix=""):
     import cartopy.crs as ccrs
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
@@ -305,13 +308,15 @@ def make_fig(case, cfg, D, L, null, null_style, root):
         axH.grid(alpha=0.2, lw=0.4)
         title(axH, next(letters), "Distance from official track" if case == "debby" else "Final distance to volcano")
     # C: shares by lead
-    n_cfg, xstats = panel_shares(axC, case, L, vars_, roles, null, null_style)
+    n_cfg, xstats = panel_shares(axC, case, L, vars_, roles, null, null_style, band)
     lC = next(letters)
     title(axC, lC, "Relative contributions by lead" + (" (step 0 excl.)" if case == "pnw" else ""))
     # variable legend (A markers, C lines, map titles), between the top row and the maps
     hv = [Line2D([0], [0], color=S.col(v), lw=1.2, marker="o", ms=3, label=f"{S.lab(v)} ({roles[v]})") for v in vars_]
     hx = [Patch(facecolor="0.5", alpha=0.3, label="95 % CI over configs")]
-    if null is not None:
+    if band is not None:
+        hx.append(Patch(facecolor="0.5", alpha=0.25, label="Null band (linkless system, p95)"))
+    elif null is not None:
         hx.append(Patch(facecolor="0.5", alpha=0.15, label="Surrogate 5–95 %") if null_style == "band" else
                   Line2D([0], [0], color="0.3", marker="_", ls="none", ms=6, mew=1.0, label="Surrogate p95"))
     lax = fig.add_subplot(gs[1, :]); lax.axis("off")
@@ -377,12 +382,14 @@ def make_fig(case, cfg, D, L, null, null_style, root):
     else:
         host.legend(handles=hl, loc="upper center", bbox_to_anchor=(0.5, 0.3), ncol=len(hl), fontsize=5.5, frameon=False)
     folder, name = FIGS[case]
+    name = name + suffix
     d = root / folder; d.mkdir(parents=True, exist_ok=True)
     fig.savefig(d / f"{name}.pdf", bbox_inches="tight")
     fig.savefig(d / f"{name}.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
     xstats.to_csv(d / f"{name}_stats.csv", index=False)
-    nul = ("no surrogate null drawn (T3 null band not available yet)" if null is None else
+    nul = ("grey band = 0 to u(t), the 95th percentile of the config-mean share of the linkless-system null (night 7, one rule for all cases)" if band is not None else
+           "no surrogate null drawn (T3 null band not available yet)" if null is None else
            "grey band = 5–95 % range of the surrogate share of each variable per lead day (T3)" if null_style == "band" else
            "short coloured dashes = 95th percentile of the surrogate share of each variable per lead day (T3; "
            "markers chosen over bands for readability, rule 6)")
@@ -406,8 +413,13 @@ def main():
     ap.add_argument("--test-n5", default=None, help="night-5 extended sets; reads/writes this dir")
     ap.add_argument("--null-dir", default=None, help="dir with T3_nullband_<case>.csv (default: the analysis dir)")
     ap.add_argument("--null-style", choices=["p95", "band"], default="p95")
+    ap.add_argument("--band-csv", default=None, help="night 7 (opt-in): CSV with columns lead_day,u for the case (use {case}); draws the 0..u(t) band, no markers")
+    ap.add_argument("--out-root", default=None, help="night 7 (opt-in): figure root (default figures_v6)")
+    ap.add_argument("--suffix", default="", help="night 7 (opt-in): appended to the figure name")
     a = ap.parse_args()
     out, root = N6T2.OUT, N6T2.FIG6
+    if a.out_root:
+        root = Path(a.out_root)
     if a.test_n5:
         out = root = Path(a.test_n5)
         for c, v in N6T2.N5_EXT.items():
@@ -424,7 +436,8 @@ def main():
         if null is not None:
             null = null[null["case"] == case]
             print("null band", nf, len(null))
-        print("fig", make_fig(case, cfg, D, L, null, a.null_style, root), flush=True)
+        band = pd.read_csv(a.band_csv.format(case=case)) if a.band_csv else None
+        print("fig", make_fig(case, cfg, D, L, null, a.null_style, root, band, a.suffix), flush=True)
 
 
 if __name__ == "__main__":
