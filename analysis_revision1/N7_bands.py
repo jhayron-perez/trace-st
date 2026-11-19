@@ -283,7 +283,7 @@ ARGS = None
 
 
 def main():
-    global ARGS
+    global ARGS, NULL_RETENTION
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", nargs="+", default=["pnw", "pinatubo", "debby"])
     ap.add_argument("--extract", action="store_true")
@@ -295,8 +295,8 @@ def main():
                     help="retention of the null runs (A, indep): harmonized (night-6 rule) or any (>= 1 successful member)")
     ap.add_argument("--variants", nargs="+", default=None, help="extract only these variants (real, A, indep)")
     ARGS = a = ap.parse_args()
+    global OUT
     NULL_RETENTION = a.null_retention
-    global OUT, NULL_RETENTION
     if a.test_n6:
         OUT = N7 / "analysis_test"
     OUT.mkdir(parents=True, exist_ok=True)
