@@ -61,6 +61,20 @@ def var_index(case, name):
 
 
 # ------------------------------------------------------------------ extraction
+NULL_RETENTION = "harmonized"
+_ids_harmonized = T.table_and_ids
+
+
+def _ids_any(case, d, partial):
+    """Run table, ids with at least one successful member, all ids (null runs, --null-retention any)."""
+    t = T._load(case, d, partial)
+    if t is None or not len(t):
+        return None, [], []
+    idc = "run_id" if case == "pnw" else "trial_id"
+    ok = (t["success_rate"] > 0) if case == "pnw" else (t["n_members_success"] >= 1)
+    return t, sorted(t.loc[ok, idc].astype(int)), sorted(t[idc].astype(int))
+
+
 def run_dirs(case, variant, test_n6):
     if variant == "real":
         return {-1: N6 / "t3" / case / "K00"}
@@ -75,6 +89,13 @@ def extract(case, variant, partial, nproc, test_n6):
     rows, cnt = [], []
     for draw, d in run_dirs(case, variant, test_n6).items():
         nv = len(real) + (1 if test_n6 and variant != "real" else 0)
+        if variant != "real" and NULL_RETENTION == "any":
+            # linkless systems cannot keep trajectories alive (night-7 finding): harmonized retention (2/3 of members,
+            # median length >= 80 % of the steps) removes almost every null run, so the null uses every run that has
+            # at least one successful member
+            T.table_and_ids = _ids_any
+        else:
+            T.table_and_ids = _ids_harmonized
         Dd, (na, nr) = T.run_densities(case, d, nv, partial, nproc)
         cnt.append(dict(case=case, variant=variant, draw=draw, n_configs=na, n_retained=nr))
         for cfg, D in Dd.items():
@@ -270,15 +291,19 @@ def main():
     ap.add_argument("--nproc", type=int, default=16)
     ap.add_argument("--no-common", action="store_true")
     ap.add_argument("--test-n6", action="store_true")
+    ap.add_argument("--null-retention", choices=["harmonized", "any"], default="harmonized",
+                    help="retention of the null runs (A, indep): harmonized (night-6 rule) or any (>= 1 successful member)")
+    ap.add_argument("--variants", nargs="+", default=None, help="extract only these variants (real, A, indep)")
     ARGS = a = ap.parse_args()
-    global OUT
+    NULL_RETENTION = a.null_retention
+    global OUT, NULL_RETENTION
     if a.test_n6:
         OUT = N7 / "analysis_test"
     OUT.mkdir(parents=True, exist_ok=True)
     allfits = []
     for case in a.cases:
         if a.extract:
-            for v in (["real"] + (["A"] if a.test_n6 else VARIANTS)):
+            for v in (a.variants or (["real"] + (["A"] if a.test_n6 else VARIANTS))):
                 extract(case, v, True if a.partial or a.test_n6 else False, a.nproc, a.test_n6)
         else:
             f = run_case(case, a.test_n6)
