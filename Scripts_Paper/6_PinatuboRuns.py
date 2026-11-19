@@ -160,6 +160,10 @@ def load_pinatubo_data(
     dlon=RES_PINATUBO,
     extra_vars=None,
 ):
+    # night 7 (opt-in): --system-path sets TST_PINATUBO_SYSTEM_PATH; the paper and extra variables are all read from it
+    system_dir = os.environ.get("TST_PINATUBO_SYSTEM_PATH")
+    if system_dir:
+        path_files_pinatubo = system_dir
     vars_list = []
     for var in var_names:
         da = xr.open_dataset(f"{path_files_pinatubo}/{var}_199101_199112.nc")[var]
@@ -167,6 +171,7 @@ def load_pinatubo_data(
     if extra_vars:
         # night-5 T6 (opt-in): --extra-path sets TST_PINATUBO_EXTRA_PATH; unset = original data dir
         extra_dir = os.environ.get("TST_PINATUBO_EXTRA_PATH") or PATH_FILES_E3SM_EXTRA
+        extra_dir = system_dir or extra_dir
         for var in extra_vars:
             da = xr.open_dataset(f"{extra_dir}/{var}_199101_199112.nc")[var]
             vars_list.append(da)
@@ -1198,6 +1203,8 @@ def parse_args():
                         help="night 5 (opt-in): run only these trial ids (configs still drawn for all --n-trials)")
     parser.add_argument("--extra-path", type=str, default=None,
                         help="night 5 T6 (opt-in): directory of the --extra-vars files (default: PATH_FILES_E3SM_EXTRA)")
+    parser.add_argument("--system-path", type=str, default=None,
+                        help="night 7 (opt-in): directory with <VAR>_199101_199112.nc for every variable (paper and --extra-vars)")
     return parser.parse_args()
 
 
@@ -1223,6 +1230,8 @@ def main():
         os.environ["TST_PINATUBO_EXTRA"] = ",".join(args.extra_vars)
     if args.extra_path:
         os.environ["TST_PINATUBO_EXTRA_PATH"] = str(args.extra_path)
+    if args.system_path:
+        os.environ["TST_PINATUBO_SYSTEM_PATH"] = str(args.system_path)
     all_jobs = build_pinatubo_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
@@ -1240,6 +1249,7 @@ def main():
         "seed": int(args.seed),
         **({"extra_vars": list(args.extra_vars)} if args.extra_vars else {}),
         **({"extra_path": str(args.extra_path)} if args.extra_path else {}),
+        **({"system_path": str(args.system_path)} if args.system_path else {}),
         "n_trials": int(args.n_trials),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),

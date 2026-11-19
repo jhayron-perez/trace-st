@@ -123,6 +123,8 @@ def canonicalize_for_json(obj):
 # -----------------------------------------------------------------------------
 def load_debby_data(path_files_debby=PATH_FILES_DEBBY, extra_inputs=None, vo_input=None):
     """extra_inputs (revision-1 T8, opt-in): list of (name, path, varname) appended after precip."""
+    # night 7 (opt-in): --system-path sets TST_DEBBY_SYSTEM_PATH; Tb and precip (and vo if --vo-input is unset) are read from there
+    path_files_debby = os.environ.get("TST_DEBBY_SYSTEM_PATH") or path_files_debby
     var_tb = xr.open_dataset(f"{path_files_debby}/BT_anomalies_TC_argon.nc4").Tb
     if vo_input is None:
         var_vo = xr.open_dataset(f"{path_files_debby}/Vo_anomalies_TC_500-700.nc4").vo
@@ -131,12 +133,16 @@ def load_debby_data(path_files_debby=PATH_FILES_DEBBY, extra_inputs=None, vo_inp
     var_pr = xr.open_dataset(f"{path_files_debby}/P_anomalies_TC_argon2.nc4").precipitation
 
     # Select the precipitation hour coordinate matching each valid timestamp.
-    datalist = []
-    for timetemp in var_pr.time:
-        hourtemp = pd.to_datetime(timetemp.values).hour
-        datatemp = var_pr.sel(time=timetemp, hour=hourtemp)
-        datalist.append(datatemp)
-    var_pr = xr.concat(datalist, dim="time").fillna(0)
+    # (night 7: a system-directory precip field without the hour dimension is used as is)
+    if "hour" in var_pr.dims or not os.environ.get("TST_DEBBY_SYSTEM_PATH"):
+        datalist = []
+        for timetemp in var_pr.time:
+            hourtemp = pd.to_datetime(timetemp.values).hour
+            datatemp = var_pr.sel(time=timetemp, hour=hourtemp)
+            datalist.append(datatemp)
+        var_pr = xr.concat(datalist, dim="time").fillna(0)
+    else:
+        var_pr = var_pr.fillna(0)
 
     var_vo = var_vo.rename({"latitude": "lat", "longitude": "lon"})
     var_tb = var_tb.assign_coords(time=var_tb.time.dt.round("1H"))
@@ -1328,6 +1334,9 @@ def parse_args():
                         help="Run only these trial ids (configs still drawn for all --n-trials)")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
+    parser.add_argument("--system-path", type=str, default=None,
+                        help="night 7 (opt-in): directory with the surrogate system; Tb and precip are read from there "
+                             "(files named as in FilesDebby); vo and the extra inputs are given by --vo-input / --extra-inputs")
     parser.add_argument("--parallel-members", action="store_true",
                         help="night 6 (opt-in): the --n-workers pool runs ensemble members (same seeds, same ensembles) "
                              "instead of whole trials, so one trial finishes in minutes")
@@ -1336,6 +1345,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.system_path:
+        os.environ["TST_DEBBY_SYSTEM_PATH"] = str(args.system_path)   # night 7: inherited by the pool workers
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1375,6 +1386,7 @@ def main():
     meta = {
         "case_name": "debby",
         "seed": int(args.seed),
+        **({"system_path": str(args.system_path)} if args.system_path else {}),
         "n_trials": int(args.n_trials),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),

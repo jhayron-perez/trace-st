@@ -1055,6 +1055,8 @@ def parse_args():
     parser.add_argument("--extra-vars", type=str, nargs="+", default=None,
                         help="night-4 A2: extra decoy variables (stems; files <extra-path>/<stem>_daily_anoms.nc)")
     parser.add_argument("--extra-path", type=str, default=None, help="night-4 A2: directory of the --extra-vars files")
+    parser.add_argument("--system-path", type=str, default=None,
+                        help="night 7 (opt-in): directory with <stem>_daily_anoms.nc for every variable (paper set and --extra-vars)")
     parser.add_argument("--run-ids", type=int, nargs="+", default=None,
                         help="Run only these run ids (configs still drawn for all --n-trials)")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
@@ -1070,6 +1072,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.system_path:
+        global PATH_FILES   # night 7: all candidate variables are read from the surrogate system directory
+        PATH_FILES = str(args.system_path).rstrip("/") + "/"
 
     print("Loading PNW21 data...", flush=True)
     case = build_case_pnw(placebo_vars=args.placebo_vars, placebo_year=args.placebo_year,
