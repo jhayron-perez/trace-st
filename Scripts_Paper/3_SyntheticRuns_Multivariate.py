@@ -362,6 +362,21 @@ def summarize_all_vars(case, ensemble_out, params):
     return row
 
 
+def _linkless_full_data(full, time_coord, ys, xs, clip, variant="A", draw=0, log_dir=None):
+    """Night 7 T3b (opt-in): every variable replaced by a surrogate of a linkless system with the same per-cell mean and
+    sd, AR(1) memory, spatial e-folding lengths and (variant "A") lag-0 correlation matrix, no lagged links
+    (data_processing/surrogates/make_linkless_synthetic.py; variant "indep": R = identity)."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "data_processing" / "surrogates" / "make_linkless_synthetic.py"
+    spec = importlib.util.spec_from_file_location("make_linkless_synthetic", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    names = [str(v) for v in full["var"].values]
+    arrs = [full.sel(var=n).values for n in names]
+    out, _ = mod.linkless_system(arrs, names, int(draw), variant=variant, clip=bool(clip), log_dir=log_dir)
+    return xr.concat([build_dataarray(n, a, time_coord, ys, xs) for n, a in zip(names, out)], dim="var")
+
+
 def build_multivariate_case(
     alpha_mix=0.6,
     T=40,
@@ -396,6 +411,7 @@ def build_multivariate_case(
     extra_mix=None,
     mix_beta=None,
     t_pad=0,
+    linkless=None,
 ):
     """n_noise / n_decoy / n_moving > 0 append non-causal variables after A, B, C
     (revision-1 T7; defaults 0 = original 3-variable case). See _build_extra_vars.
@@ -527,6 +543,8 @@ def build_multivariate_case(
         )
 
     full_data_run = xr.concat([full_data_A, full_data_B, full_data_C] + extra_list, dim="var")
+    if linkless:   # night-7 T3b (opt-in): the whole candidate set replaced by a linkless system (null of approach A)
+        full_data_run = _linkless_full_data(full_data_run, time_coord, ys, xs, clip_to_positive, **dict(linkless))
     full_data_run = full_data_run.rename({"y": "lat", "x": "lon"})
     date_end = str(time_coord[-1].date())
 
@@ -1725,6 +1743,11 @@ def parse_args():
     parser.add_argument("--parallel-members", action="store_true",
                         help="night 6 (opt-in): the --n-workers pool runs ensemble members of every (trial, alpha) "
                              "(same seeds, same ensembles) instead of whole trials")
+    parser.add_argument("--linkless", type=str, default=None, choices=["A", "indep"],
+                        help="night 7 T3b (opt-in): replace all variables by a linkless surrogate system "
+                             "(A: with the lag-0 correlation matrix R of the variables; indep: R = identity)")
+    parser.add_argument("--linkless-draw", type=int, default=0, help="night 7 T3b: surrogate draw (seed)")
+    parser.add_argument("--linkless-log", type=str, default=None, help="night 7 T3b: directory for the realized-statistics JSON")
     return parser.parse_args()
 
 
@@ -1768,6 +1791,9 @@ def night2_case_kwargs(args):
         kw["mix_beta"] = {k: float(v) for k, v in (s.split("=") for s in args.mix_beta)}
     if getattr(args, "t_pad", 0):   # night-6 T4
         kw["t_pad"] = int(args.t_pad)
+    if getattr(args, "linkless", None):   # night-7 T3b
+        kw["linkless"] = dict(variant=args.linkless, draw=int(args.linkless_draw),
+                              **({"log_dir": args.linkless_log} if args.linkless_log else {}))
     return kw
 
 
