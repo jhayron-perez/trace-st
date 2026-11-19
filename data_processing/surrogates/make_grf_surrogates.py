@@ -1163,7 +1163,7 @@ def measure_system7(nt, yx, params, L, sd_maps, cs, restandardize, periodic, cma
     return xw, xs, R
 
 
-def calibrate_mixing7(R, params, yx, cfg7, log=print, max_iter=8, damp=0.9):
+def calibrate_mixing7(R, params, yx, cfg7, log=print, max_iter=12, damp=0.7):
     """Iterate C until the measured lag-0 correlation of the generated system equals R. Returns (C, L, history)."""
     V = len(params)
     C = np.eye(V)
@@ -1187,7 +1187,7 @@ def calibrate_mixing7(R, params, yx, cfg7, log=print, max_iter=8, damp=0.9):
             best = (worst, C.copy(), L.copy())
         if worst < R_TOL_CALIB7:
             break
-        C = C + damp * err
+        C = nearest_corr7(C) + damp * err        # anti-windup: update from the feasible (projected) matrix
         np.fill_diagonal(C, 1.0)
         C = np.clip(C, -0.995, 0.995)
         np.fill_diagonal(C, 1.0)
