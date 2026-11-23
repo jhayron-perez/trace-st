@@ -243,7 +243,7 @@ def build_case_pinatubo():
         ),
     )
 
-    return dict(
+    case = dict(
         case_name="pinatubo",
         full_data=full_data,
         date_end=DATE_END_PINATUBO,
@@ -254,6 +254,12 @@ def build_case_pinatubo():
         volcano_lon_0360=VOLCANO_LON_PINATUBO % 360.0,
         var_names=list(full_data["var"].values),
     )
+    decoy_dir = os.environ.get("TST_PINATUBO_DECOY")   # night 8 (opt-in): --decoy-pool; member m appends realization m
+    if decoy_dir:
+        from trace_st import decoy as _decoy
+        case["decoy_pool"] = decoy_dir
+        case["var_names"] = case["var_names"] + [_decoy.DECOY_NAME]
+    return case
 
 
 # -----------------------------------------------------------------------------
@@ -388,7 +394,11 @@ def run_ensemble(case, params, M=30, seed=SEARCH_SEED):
         t0 = time.perf_counter()
 
         try:
-            centers, parents, out = run_one_track(case["full_data"], p, case["date_end"])
+            fd_m = case["full_data"]
+            if case.get("decoy_pool"):   # night 8 (opt-in)
+                from trace_st import decoy as _decoy
+                fd_m = _decoy.with_decoy(fd_m, case["decoy_pool"], m)
+            centers, parents, out = run_one_track(fd_m, p, case["date_end"])
             ok = True
             err = ""
         except Exception as e:
@@ -1205,6 +1215,9 @@ def parse_args():
                         help="night 5 T6 (opt-in): directory of the --extra-vars files (default: PATH_FILES_E3SM_EXTRA)")
     parser.add_argument("--system-path", type=str, default=None,
                         help="night 7 (opt-in): directory with <VAR>_199101_199112.nc for every variable (paper and --extra-vars)")
+    parser.add_argument("--decoy-pool", type=str, default=None,
+                        help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool); member m appends "
+                             "realization m as the last candidate variable DECOY")
     return parser.parse_args()
 
 
@@ -1232,6 +1245,8 @@ def main():
         os.environ["TST_PINATUBO_EXTRA_PATH"] = str(args.extra_path)
     if args.system_path:
         os.environ["TST_PINATUBO_SYSTEM_PATH"] = str(args.system_path)
+    if args.decoy_pool:
+        os.environ["TST_PINATUBO_DECOY"] = str(args.decoy_pool)
     all_jobs = build_pinatubo_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
@@ -1250,6 +1265,7 @@ def main():
         **({"extra_vars": list(args.extra_vars)} if args.extra_vars else {}),
         **({"extra_path": str(args.extra_path)} if args.extra_path else {}),
         **({"system_path": str(args.system_path)} if args.system_path else {}),
+        **({"decoy_pool": str(args.decoy_pool)} if args.decoy_pool else {}),
         "n_trials": int(args.n_trials),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),

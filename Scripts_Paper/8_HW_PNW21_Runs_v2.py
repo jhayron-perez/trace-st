@@ -402,6 +402,7 @@ def run_ensemble_tracks(
     drop_failed=False,
     verbose=True,
     seed=None,
+    decoy_pool=None,
 ):
     """
     Run an ensemble of TraCE-ST tracks in parallel.
@@ -417,7 +418,11 @@ def run_ensemble_tracks(
         p_i = copy.deepcopy(params)
         if seed is not None:
             p_i["seed"] = int(seed) + i
-        args_list.append((full_data, p_i, date_end, i))
+        fd_i = full_data
+        if decoy_pool:   # night 8 (opt-in): member i gets realization i of the decoy pool as the last variable
+            from trace_st import decoy as _decoy
+            fd_i = _decoy.with_decoy(full_data, decoy_pool, i)
+        args_list.append((fd_i, p_i, date_end, i))
 
     ctx = mp.get_context(start_method)
     with ctx.Pool(processes=nproc) as pool:
@@ -955,12 +960,17 @@ def run_hyperparam_ensemble_search(
     window_labels=("days_1_10", "days_11_20", "days_21_30"),
     continue_if_exists=True,
     seed=None,
+    decoy_pool=None,
 ):
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
 
     summary_rows = []
     full_data_run = case["full_data"]
+    full_data_members = full_data_run
+    if decoy_pool:   # night 8 (opt-in): variable names/grid of the summaries include the decoy (last variable)
+        from trace_st import decoy as _decoy
+        full_data_run = _decoy.with_decoy(full_data_run, decoy_pool, 0)
 
     for i, trial in enumerate(param_samples):
         run_id = int(trial.get("run_id", i))
@@ -985,7 +995,8 @@ def run_hyperparam_ensemble_search(
             print(f"params: {params_run}", flush=True)
 
         ensemble_results_all = run_ensemble_tracks(
-            full_data=full_data_run,
+            full_data=full_data_members,
+            decoy_pool=decoy_pool,
             params=params_run,
             date_end=case["date_end"],
             n_members=n_members,
@@ -1057,6 +1068,9 @@ def parse_args():
     parser.add_argument("--extra-path", type=str, default=None, help="night-4 A2: directory of the --extra-vars files")
     parser.add_argument("--system-path", type=str, default=None,
                         help="night 7 (opt-in): directory with <stem>_daily_anoms.nc for every variable (paper set and --extra-vars)")
+    parser.add_argument("--decoy-pool", type=str, default=None,
+                        help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool); member m appends "
+                             "realization m as the last candidate variable DECOY")
     parser.add_argument("--run-ids", type=int, nargs="+", default=None,
                         help="Run only these run ids (configs still drawn for all --n-trials)")
     parser.add_argument("--force-prob-rule", type=str, default=None, choices=["linear", "softmax"],
@@ -1117,6 +1131,7 @@ def main():
         window_labels=("days_1_10", "days_11_20", "days_21_30"),
         continue_if_exists=args.continue_if_exists,
         seed=args.seed,
+        **({"decoy_pool": args.decoy_pool} if args.decoy_pool else {}),
     )
 
     print("\nFinished.", flush=True)
