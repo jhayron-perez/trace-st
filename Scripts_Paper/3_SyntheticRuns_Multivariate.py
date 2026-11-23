@@ -244,6 +244,19 @@ def _drive_decoy(X, nz, T, phi, beta, lag, nonlinear):
     return D
 
 
+def _typical_mix_field(A, B, C, k, clip):
+    """Night 8: typical field of the case (median statistics of V1-V3, independent, no lagged links), realization k
+    (seed typical_seed(4, 100 + k), data_processing/surrogates/make_linkless_synthetic.py)."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "data_processing" / "surrogates" / "make_linkless_synthetic.py"
+    spec = importlib.util.spec_from_file_location("make_linkless_synthetic", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    tg = mod.typical_targets([np.asarray(A), np.asarray(B), np.asarray(C)])
+    # not clipped: clipping a field built from the clipped variables' own mean and sd removes about half of its variance
+    return mod.typical_field(tg, mod.typical_seed(4, 100 + int(k)), clip=False)
+
+
 def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig_x, seed, clip_to_positive,
                     decoy_phi, decoy_beta, decoy_sigma, n_moving_prev=0, mix_beta=None, t_pad=0):
     """Night-5 T3 composition (see _build_extra_vars, extra_mix). Returns (dataarrays, [(name, type)]).
@@ -277,6 +290,9 @@ def _build_mix_vars(A, C, B, time_coord, ys, xs, x2d, y2d, T, mix, *, sig_y, sig
             if clip_to_positive:
                 arr = np.clip(arr, 0.0, None)
             name = f"M{kk + 1}"
+        elif typ == "typical":   # night 8 (opt-in): independent linkless field with the median statistics of A, B, C
+            arr = _typical_mix_field(A, B, C, k, clip_to_positive)
+            name = f"Z{k + 1}"
         elif typ in ("response", "delayed", "nonlinear"):
             off = {"response": 700, "delayed": 500, "nonlinear": 600}[typ]
             nz = make_spatiotemporal_ar1_noise(A.shape, phi=0.8, sigma=float(decoy_sigma), rng=np.random.default_rng(seed + off + k))
@@ -354,7 +370,7 @@ def summarize_all_vars(case, ensemble_out, params):
     }
     for i, nm in enumerate(names):
         row[f"t7_density_{nm}"] = float(dens[i])
-    for typ in ("response", "delayed", "nonlinear"):   # night-5 extra_mix types (columns only when present)
+    for typ in ("response", "delayed", "nonlinear", "typical"):   # night-5 extra_mix types (typical: night 8) (columns only when present)
         if typ in types:
             row[f"t7_n_{typ}"] = types.count(typ)
             row[f"t7_share_density_{typ}"] = (float(sum(dens[i] for i, t in enumerate(types) if t == typ) / tot)
@@ -1707,8 +1723,10 @@ def parse_args():
     parser.add_argument("--decoy-lag", type=int, default=1, help="night-5 T3: decoys driven at lag L (default 1 = original)")
     parser.add_argument("--decoy-nonlinear", type=str, default=None, choices=["rectified"],
                         help="night-5 T3: rectified drive beta*max(X[t-L]-0.5, 0) (default none = linear, original)")
+    parser.add_argument("--trial-ids", type=int, nargs="+", default=None,
+                        help="night 8 S10: run only these trial ids of the drawn configs (default: all)")
     parser.add_argument("--extra-mix", type=str, nargs="+", default=None,
-                        choices=["noise", "response", "moving", "delayed", "nonlinear"],
+                        choices=["noise", "response", "moving", "delayed", "nonlinear", "typical"],
                         help="night-5 T3: extra variables of these types, in this order (see _build_extra_vars)")
     parser.add_argument("--mix-beta", type=str, nargs="+", default=None,
                         help="night-5 T3: per-type beta for --extra-mix decoys, e.g. delayed=0.2 (default: --decoy-beta)")
@@ -1851,6 +1869,11 @@ def main():
     if args.force_prob_rule:
         for _, trial in all_jobs:
             trial["prob_rule"] = args.force_prob_rule
+    if getattr(args, "trial_ids", None):   # night 8 S10 (opt-in): run only these paper configs (same draws, same ids)
+        keep_ids = {int(i) for i in args.trial_ids}
+        all_jobs = [j for j in all_jobs if int(j[0]) in keep_ids]
+        if not all_jobs:
+            raise SystemExit("--trial-ids: none of the ids exists")
     if args.set_param:   # night-5 T4 out-of-sample check (opt-in): fixed values after the draws
         for _, trial in all_jobs:
             trial.update(_parse_set_param(args.set_param))

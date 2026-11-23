@@ -123,3 +123,45 @@ def linkless_system(arrs, names, draw, variant="A", clip=True, log_dir=None, tag
         with open(Path(log_dir) / f"linkless_{variant}_d{int(draw):02d}{tag}.json", "w") as f:
             json.dump(rep, f)
     return out, rep
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Night 8: the "typical field" of a case = an independent linkless field with the MEDIAN statistics of the case's
+# variables (per-cell mean and sd map: per-cell median; pooled lag-1 rho, e-folding L_lat and L_lon: median over the
+# variables). Used as the decoy of the filter and as the "unrelated" added variable of the new S10.
+# ---------------------------------------------------------------------------------------------------------------
+TYPICAL_BASE_SEED = 20261123
+
+
+def typical_seed(case_idx, member):
+    """Seed of typical-field realization `member` of case `case_idx` (synthetic = 4): 20261123 + 1e6 * case + member."""
+    return int(TYPICAL_BASE_SEED + 1000000 * int(case_idx) + int(member))
+
+
+def typical_targets(arrs):
+    """Median statistics over the (T, NY, NX) arrays of the case's variables."""
+    st = [field_stats(x) for x in arrs]
+    return dict(mean=np.median(np.stack([s["mean"] for s in st]), 0).astype(np.float32),
+                sd=np.median(np.stack([s["sd"] for s in st]), 0).astype(np.float32),
+                rho=float(np.median([s["rho"] for s in st])), L_lat=float(np.median([s["L_lat"] for s in st])),
+                L_lon=float(np.median([s["L_lon"] for s in st])), nt=int(np.asarray(arrs[0]).shape[0]))
+
+
+def typical_field(targets, seed, clip=True, shape=None):
+    """One linkless realization (T, NY, NX) float32 with the typical-field `targets` (see typical_targets)."""
+    G = _grf()
+    T = targets["nt"]
+    NY, NX = targets["sd"].shape
+    sl, sn = max(targets["L_lat"] / 2.0, 1e-3), max(targets["L_lon"] / 2.0, 1e-3)
+    params = [dict(phi=_phi_for(targets["rho"], T), s_lat=sl, s_lon=sn, pad_lat=int(np.ceil(4.0 * sl)) + 1,
+                   pad_lon=int(np.ceil(4.0 * sn)) + 1)]
+    u = G.system_unit_fields7(T, (NY, NX), params, np.eye(1), [np.random.default_rng(int(seed))])[0]
+    # the targets are sample sds of a T-step series (cell mean removed): inflate by the expected deflation of the
+    # sample variance of an AR(1) process of coefficient phi (variance of the sample mean), so that the realized
+    # sample variance, as measured by field_stats, equals the target
+    phi = params[0]["phi"]
+    vmean = ((1.0 + phi) / (1.0 - phi) - 2.0 * phi * (1.0 - phi ** T) / (T * (1.0 - phi) ** 2)) / T
+    x = targets["mean"][None] + targets["sd"][None] * u / np.sqrt(max(1.0 - vmean, 0.2))
+    if clip:
+        x = np.clip(x, 0.0, None)
+    return x.astype(np.float32)
