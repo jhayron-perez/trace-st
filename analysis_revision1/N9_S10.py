@@ -19,10 +19,10 @@ S.set_style()
 sm = pd.read_csv(R1 / "night8/analysis/S10_summary.csv")
 ls = pd.read_csv(R1 / "night8/analysis/S10_linkstats.csv")
 FAMC = dict(typical="#0072B2", response="#D55E00", nonlinear="#CC79A7")
-FAML = dict(typical="Typical field", response="Response (driven by B)", nonlinear="Sibling (nonlinear)")
+FAML = dict(typical="Typical field", response="Response (driven by V$_2$)", nonlinear="Sibling (nonlinear)")
 fig, ax = plt.subplots(2, 2, figsize=(S.DOUBLE, 10.5 * S.CM))
 sty = dict(best=("o-", "#555555", "Best 5 configs"), random=("s--", "#999999", "Random 5 configs"), pooled=("-", "#000000", "Pooled (9 configs)"))
-for k, (col, ttl) in enumerate([("share_true", "True-parent share (A + C)"), ("alpha_err", "|α error|")]):
+for k, (col, ttl) in enumerate([("share_true", "Normalized integrated\ndensity of V$_1$ + V$_3$"), ("alpha_err", r"$|\alpha-\hat{\alpha}|$")]):
     a = ax[0, k]
     for lab in ("best", "random", "pooled"):
         h = sm[sm.subset == lab].sort_values("p")
@@ -48,7 +48,7 @@ for f in FAMC:
     hh = h.dropna(subset=[f"share_{f}"])
     a.plot(hh.p, hh[f"share_{f}"], "o--", color=FAMC[f], ms=3, mfc="white")
 a.set_ylabel("Fraction / share"); a.set_xlabel("Number of variables p"); a.set_xticks([6, 9, 12, 15, 18, 21])
-a.plot([], [], "k-", label="Link-level selection (B regressions with any link)"); a.plot([], [], "k--", label="Density share")
+a.plot([], [], "k-", label="Link-level selection (V$_2$ regressions with any link)"); a.plot([], [], "k--", label="Density share")
 a.legend(loc="center right", fontsize=5.5)
 S.panel_labels(ax.ravel())
 fig.tight_layout()

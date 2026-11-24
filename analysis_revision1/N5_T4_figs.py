@@ -24,7 +24,7 @@ from N5_T4_analysis import CASES, NAMES, EDGES, load, lin, boot_ci, T4  # noqa: 
 
 CASE_COL = dict(t1="#56B4E9", t2="#0072B2", debby="#CC79A7", pinatubo="#D55E00", pnw="#000000")
 COMP_COL = "#999999"
-SHARE_LAB = dict(t1="A (true parent)", t2="V$_1$+V$_3$ (true)", debby="vo, 5–15 d", pinatubo="SO$_2$, 4–16 d",
+SHARE_LAB = dict(t1="V$_1$ (true parent)", t2="V$_1$+V$_3$ (true)", debby="vo, 5–15 d", pinatubo="SO$_2$, 4–16 d",
                  pnw="Z500+TCWV, 1–10 d")
 UNIT = dict(t1="grid units", t2="days", debby="0.25° (h)", pinatubo="4° (d)", pnw="2° (d)")
 FOLDER = "guidelines"
