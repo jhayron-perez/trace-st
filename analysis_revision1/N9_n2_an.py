@@ -91,7 +91,7 @@ if case in ("pnw", "pinatubo"):
     base = {c: (data[c][0].sum(0), c in ids_ret) for c in cfgs if c in data}
 else:
     base = {}
-    for p in sorted((R1 / "night9/n1").glob("deb_p[0-9]")):
+    for p in sorted((R1 / "night9/n1").glob("deb_q[0-9]")):
         for i, v in D_of_dir(p, nr + 1).items():
             if i in cfgs:
                 base[i] = v
