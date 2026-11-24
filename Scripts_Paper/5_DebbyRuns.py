@@ -289,6 +289,12 @@ SEARCH_SPACE_EXTRA_DEBBY = dict(
 )
 
 
+def use_common_search_space():
+    """Night 8 T1c (opt-in): common lambda_a / l1_ratio ranges (same in every case); draw order unchanged."""
+    SEARCH_SPACE_GRANGER_DEBBY["lambda_a"] = lambda rng: float(10 ** rng.uniform(-3.0, 0.0))
+    SEARCH_SPACE_GRANGER_DEBBY["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-4.0, 0.0))
+
+
 def _draw_from_space(rng, x):
     if callable(x):
         return x(rng)
@@ -1337,6 +1343,9 @@ def parse_args():
     parser.add_argument("--system-path", type=str, default=None,
                         help="night 7 (opt-in): directory with the surrogate system; Tb and precip are read from there "
                              "(files named as in FilesDebby); vo and the extra inputs are given by --vo-input / --extra-inputs")
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common"],
+                        help="night 8 T1c (opt-in): 'common' draws lambda_a 10^U(-3,0) and l1_ratio 10^U(-4,0) "
+                             "(one range for all cases); scale parameters unchanged")
     parser.add_argument("--parallel-members", action="store_true",
                         help="night 6 (opt-in): the --n-workers pool runs ensemble members (same seeds, same ensembles) "
                              "instead of whole trials, so one trial finishes in minutes")
@@ -1363,6 +1372,8 @@ def main():
     meta_path = outdir / "run_metadata.json"
     summary_path = outdir / "run_summary.json"
 
+    if args.search_space == "common":
+        use_common_search_space()
     all_jobs = build_debby_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]

@@ -299,6 +299,12 @@ SEARCH_SPACE_EXTRA_PINATUBO = dict(
 )
 
 
+def use_common_search_space():
+    """Night 8 T1c (opt-in): common lambda_a / l1_ratio ranges (same in every case); draw order unchanged."""
+    SEARCH_SPACE_GRANGER_PINATUBO["lambda_a"] = lambda rng: float(10 ** rng.uniform(-3.0, 0.0))
+    SEARCH_SPACE_GRANGER_PINATUBO["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-4.0, 0.0))
+
+
 def _draw_from_space(rng, x):
     if callable(x):
         return x(rng)
@@ -1215,6 +1221,9 @@ def parse_args():
                         help="night 5 T6 (opt-in): directory of the --extra-vars files (default: PATH_FILES_E3SM_EXTRA)")
     parser.add_argument("--system-path", type=str, default=None,
                         help="night 7 (opt-in): directory with <VAR>_199101_199112.nc for every variable (paper and --extra-vars)")
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common"],
+                        help="night 8 T1c (opt-in): 'common' draws lambda_a 10^U(-3,0) and l1_ratio 10^U(-4,0) "
+                             "(one range for all cases); scale parameters unchanged")
     parser.add_argument("--decoy-pool", type=str, default=None,
                         help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool); member m appends "
                              "realization m as the last candidate variable DECOY")
@@ -1247,6 +1256,8 @@ def main():
         os.environ["TST_PINATUBO_SYSTEM_PATH"] = str(args.system_path)
     if args.decoy_pool:
         os.environ["TST_PINATUBO_DECOY"] = str(args.decoy_pool)
+    if args.search_space == "common":
+        use_common_search_space()
     all_jobs = build_pinatubo_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]

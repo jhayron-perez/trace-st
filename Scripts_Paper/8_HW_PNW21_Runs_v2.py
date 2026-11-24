@@ -267,6 +267,12 @@ def use_wide_search_space():
     SEARCH_SPACE_GRANGER_PNW["lambda_a"] = lambda rng: float(10 ** rng.uniform(-3.0, 0.5))
 
 
+def use_common_search_space():
+    """Night 8 T1c (opt-in): common lambda_a / l1_ratio ranges (same in every case); draw order unchanged."""
+    SEARCH_SPACE_GRANGER_PNW["lambda_a"] = lambda rng: float(10 ** rng.uniform(-3.0, 0.0))
+    SEARCH_SPACE_GRANGER_PNW["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-4.0, 0.0))
+
+
 def _draw_from_space(rng: np.random.Generator, x):
     if callable(x):
         return x(rng)
@@ -1061,8 +1067,9 @@ def parse_args():
     parser.add_argument("--placebo-shift-lon", type=float, default=0.0, help="N2: placebo shifted east by D degrees")
     parser.add_argument("--placebo-mode", type=str, default="add", choices=["add", "replace"],
                         help="N2: add the placebo (original) or replace the original variable by it")
-    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide"],
-                        help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side")
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide", "common"],
+                        help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side; "
+                             "night 8 T1c: 'common' draws lambda_a 10^U(-3,0), l1_ratio 10^U(-4,0), scale parameters unchanged")
     parser.add_argument("--extra-vars", type=str, nargs="+", default=None,
                         help="night-4 A2: extra decoy variables (stems; files <extra-path>/<stem>_daily_anoms.nc)")
     parser.add_argument("--extra-path", type=str, default=None, help="night-4 A2: directory of the --extra-vars files")
@@ -1105,6 +1112,8 @@ def main():
     print("Sampling hyperparameters...", flush=True)
     if args.search_space == "wide":
         use_wide_search_space()
+    elif args.search_space == "common":
+        use_common_search_space()
     jobs = build_pnw_jobs(n_trials=args.n_trials, seed=args.seed)
     param_samples = [trial for _, trial in jobs]
     if args.force_prob_rule:
