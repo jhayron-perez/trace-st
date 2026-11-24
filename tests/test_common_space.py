@@ -46,3 +46,18 @@ class TestCommonSpace(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnionSpace(unittest.TestCase):
+    def test_union_ranges_debby_synthetic(self):
+        for script, builder in (("5_DebbyRuns.py", "build_debby_jobs"), ("3_SyntheticRuns_Multivariate.py", "build_multivar_jobs")):
+            base = getattr(load_script(script), builder)(200, seed=7)
+            mod = load_script(script)
+            mod.use_union_search_space()
+            jobs = getattr(mod, builder)(200, seed=7)
+            lams = np.log10([t["lambda_a"] for _, t in jobs]); l1s = np.log10([t["l1_ratio"] for _, t in jobs])
+            self.assertTrue(-2.5 <= lams.min() and lams.max() <= 0.0 and -1.0 <= l1s.min() and l1s.max() <= 0.0)
+            for (_, b), (_, c) in zip(base, jobs):
+                for k in b:
+                    if k not in ("lambda_a", "l1_ratio"):
+                        self.assertEqual(b[k], c[k])

@@ -676,6 +676,12 @@ def use_common_search_space():
     SEARCH_SPACE_GRANGER["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-4.0, 0.0))
 
 
+def use_union_search_space():
+    """Night 8 T1c amendment (opt-in): union of the multivariate cases, lambda_a 10^U(-2.5,0), l1_ratio 10^U(-1,0)."""
+    SEARCH_SPACE_GRANGER["lambda_a"] = lambda rng: float(10 ** rng.uniform(-2.5, 0.0))
+    SEARCH_SPACE_GRANGER["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-1.0, 0.0))
+
+
 def _draw_from_space(rng, x):
     if callable(x):
         return x(rng)
@@ -1742,7 +1748,7 @@ def parse_args():
                         help="night 5 (opt-in): set prob_rule on every drawn config after the draws (draws unchanged)")
     parser.add_argument("--strength-mode", type=str, default="native", choices=["native", "refit"],
                         help="T9: link-strength definition passed to run_track")
-    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide", "common"],
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "wide", "common", "union"],
                         help="T10: 'wide' widens W/box/r by one step and lambda by 0.5 decade each side; "
                              "night 8 T1c: 'common' draws lambda_a 10^U(-3,0), l1_ratio 10^U(-4,0), scale parameters unchanged")
     # night-2 opt-ins (C/D); defaults = original generator
@@ -1870,8 +1876,8 @@ def main():
 
     if args.search_space == "wide":
         use_wide_search_space()
-    elif args.search_space == "common":
-        use_common_search_space()
+    elif args.search_space in ("common", "union"):
+        (use_common_search_space if args.search_space == "common" else use_union_search_space)()
     all_jobs = build_multivar_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.timewindow_choices:
         all_jobs = override_timewindow(all_jobs, args.timewindow_choices, args.seed)

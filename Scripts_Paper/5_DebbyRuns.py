@@ -295,6 +295,12 @@ def use_common_search_space():
     SEARCH_SPACE_GRANGER_DEBBY["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-4.0, 0.0))
 
 
+def use_union_search_space():
+    """Night 8 T1c amendment (opt-in): union of the multivariate cases, lambda_a 10^U(-2.5,0), l1_ratio 10^U(-1,0)."""
+    SEARCH_SPACE_GRANGER_DEBBY["lambda_a"] = lambda rng: float(10 ** rng.uniform(-2.5, 0.0))
+    SEARCH_SPACE_GRANGER_DEBBY["l1_ratio"] = lambda rng: float(10 ** rng.uniform(-1.0, 0.0))
+
+
 def _draw_from_space(rng, x):
     if callable(x):
         return x(rng)
@@ -1343,7 +1349,7 @@ def parse_args():
     parser.add_argument("--system-path", type=str, default=None,
                         help="night 7 (opt-in): directory with the surrogate system; Tb and precip are read from there "
                              "(files named as in FilesDebby); vo and the extra inputs are given by --vo-input / --extra-inputs")
-    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common"],
+    parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common", "union"],
                         help="night 8 T1c (opt-in): 'common' draws lambda_a 10^U(-3,0) and l1_ratio 10^U(-4,0) "
                              "(one range for all cases); scale parameters unchanged")
     parser.add_argument("--parallel-members", action="store_true",
@@ -1372,8 +1378,8 @@ def main():
     meta_path = outdir / "run_metadata.json"
     summary_path = outdir / "run_summary.json"
 
-    if args.search_space == "common":
-        use_common_search_space()
+    if args.search_space in ("common", "union"):
+        (use_common_search_space if args.search_space == "common" else use_union_search_space)()
     all_jobs = build_debby_jobs(n_trials=args.n_trials, seed=args.seed)
     if args.trial_ids is not None:
         all_jobs = [j for j in all_jobs if int(j[0]) in set(args.trial_ids)]
