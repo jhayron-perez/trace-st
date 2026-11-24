@@ -258,7 +258,7 @@ def build_case_pinatubo():
     if decoy_dir:
         from trace_st import decoy as _decoy
         case["decoy_pool"] = decoy_dir
-        case["var_names"] = case["var_names"] + [_decoy.DECOY_NAME]
+        case["var_names"] = case["var_names"] + [_decoy.DECOY_NAME] + _decoy.extra_names()
     return case
 
 
@@ -1224,6 +1224,8 @@ def parse_args():
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common"],
                         help="night 8 T1c (opt-in): 'common' draws lambda_a 10^U(-3,0) and l1_ratio 10^U(-4,0) "
                              "(one range for all cases); scale parameters unchanged")
+    parser.add_argument("--decoy-extra", type=str, default=None,
+                        help="night 9 (opt-in, S11): DIR|DRAW|N: N extra typical fields X01.. from DIR/drawDD/x_JJ.nc appended after DECOY (same for every member)")
     parser.add_argument("--decoy-pool", type=str, default=None,
                         help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool); member m appends "
                              "realization m as the last candidate variable DECOY")
@@ -1254,6 +1256,8 @@ def main():
         os.environ["TST_PINATUBO_EXTRA_PATH"] = str(args.extra_path)
     if args.system_path:
         os.environ["TST_PINATUBO_SYSTEM_PATH"] = str(args.system_path)
+    if args.decoy_extra:
+        os.environ["TST_DECOY_EXTRA"] = str(args.decoy_extra)   # night 9: inherited by the pool workers
     if args.decoy_pool:
         os.environ["TST_PINATUBO_DECOY"] = str(args.decoy_pool)
     if args.search_space == "common":

@@ -1075,6 +1075,8 @@ def parse_args():
     parser.add_argument("--extra-path", type=str, default=None, help="night-4 A2: directory of the --extra-vars files")
     parser.add_argument("--system-path", type=str, default=None,
                         help="night 7 (opt-in): directory with <stem>_daily_anoms.nc for every variable (paper set and --extra-vars)")
+    parser.add_argument("--decoy-extra", type=str, default=None,
+                        help="night 9 (opt-in, S11): DIR|DRAW|N: N extra typical fields X01.. from DIR/drawDD/x_JJ.nc appended after DECOY (same for every member)")
     parser.add_argument("--decoy-pool", type=str, default=None,
                         help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool); member m appends "
                              "realization m as the last candidate variable DECOY")
@@ -1093,6 +1095,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.decoy_extra:
+        os.environ["TST_DECOY_EXTRA"] = str(args.decoy_extra)   # night 9: inherited by the workers
     if args.system_path:
         global PATH_FILES   # night 7: all candidate variables are read from the surrogate system directory
         PATH_FILES = str(args.system_path).rstrip("/") + "/"

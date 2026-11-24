@@ -201,6 +201,11 @@ def load_debby_observed_track(
     )
 
 
+def _decoy_extra_names():
+    from trace_st import decoy as _decoy
+    return _decoy.extra_names()
+
+
 def build_case_debby(extra_inputs=None, vo_input=None):
     full_data = load_debby_data(extra_inputs=extra_inputs, vo_input=vo_input)
     obs_track = load_debby_observed_track()
@@ -247,7 +252,7 @@ def build_case_debby(extra_inputs=None, vo_input=None):
         params_base=params_base,
         event_lat=EVENT_LAT_DEBBY,
         event_lon_0360=EVENT_LON_DEBBY % 360.0,
-        var_names=list(full_data["var"].values) + (["DECOY"] if os.environ.get("TST_DEBBY_DECOY") else []),
+        var_names=list(full_data["var"].values) + (["DECOY"] + _decoy_extra_names() if os.environ.get("TST_DEBBY_DECOY") else []),
         **({"decoy_pool": os.environ["TST_DEBBY_DECOY"]} if os.environ.get("TST_DEBBY_DECOY") else {}),   # night 8 (opt-in): --decoy-pool
         observed_track=obs_track,
     )
@@ -1361,6 +1366,8 @@ def parse_args():
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common", "union"],
                         help="night 8 T1c (opt-in): 'common' draws lambda_a 10^U(-3,0) and l1_ratio 10^U(-4,0) "
                              "(one range for all cases); scale parameters unchanged")
+    parser.add_argument("--decoy-extra", type=str, default=None,
+                        help="night 9 (opt-in, S11): DIR|DRAW|N: N extra typical fields X01.. from DIR/drawDD/x_JJ.nc appended after DECOY (same for every member)")
     parser.add_argument("--decoy-pool", type=str, default=None,
                         help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool on the analysis grid); member m "
                              "appends realization m as the last candidate variable DECOY")
@@ -1374,6 +1381,8 @@ def main():
     args = parse_args()
     if args.system_path:
         os.environ["TST_DEBBY_SYSTEM_PATH"] = str(args.system_path)   # night 7: inherited by the pool workers
+    if args.decoy_extra:
+        os.environ["TST_DECOY_EXTRA"] = str(args.decoy_extra)   # night 9: inherited by the pool workers
     if args.decoy_pool:
         os.environ["TST_DEBBY_DECOY"] = str(args.decoy_pool)   # night 8: inherited by the pool workers
 

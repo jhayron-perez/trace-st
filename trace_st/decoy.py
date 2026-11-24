@@ -5,6 +5,7 @@ analysis array (all dims of ``full_data`` except "var", same coordinates). Membe
 realization m as the last variable (``with_decoy``); the pool is therefore the same for every configuration.
 Not imported by ``trace_st/__init__``: nothing changes unless a run script is started with --decoy-pool.
 """
+import os as _os
 from pathlib import Path
 
 import numpy as np
@@ -39,4 +40,48 @@ def with_decoy(full_data, pool_dir, member, name=DECOY_NAME):
         if not ok:
             raise ValueError(f"decoy pool {pool_dir} member {member}: coordinate {k} differs from the analysis array")
     d = d.assign_coords({k: full_data[k] for k in dims}).astype(full_data.dtype).expand_dims(var=[name])
-    return xr.concat([full_data, d.reset_coords(drop=True)], dim="var").transpose(*full_data.dims)
+    out = xr.concat([full_data, d.reset_coords(drop=True)], dim="var").transpose(*full_data.dims)
+    return with_extras(out) if _os.environ.get("TST_DECOY_EXTRA") else out
+
+
+# ---- night 9 (N2, S11; opt-in): K-1 additional typical fields, the same for every member of a run ------------------------
+# TST_DECOY_EXTRA = "<dir>|<draw>|<n>" appends n fields X01..Xn read from <dir>/draw<dd>/x_<jj>.nc (analysis array of the
+# case) after the member's DECOY. Set by the run scripts' --decoy-extra flag; unset = nothing changes.
+
+_XCACHE = {}
+
+
+def extra_spec():
+    s = _os.environ.get("TST_DECOY_EXTRA")
+    if not s:
+        return None
+    d, draw, n = s.split("|")
+    return d, int(draw), int(n)
+
+
+def extra_names():
+    sp = extra_spec()
+    return [] if sp is None else [f"X{j:02d}" for j in range(1, sp[2] + 1)]
+
+
+def _load_extra(d, draw, j):
+    key = (d, draw, j)
+    if key not in _XCACHE:
+        with xr.open_dataset(Path(d) / f"draw{draw:02d}" / f"x_{j:02d}.nc") as ds:
+            _XCACHE[key] = ds[list(ds.data_vars)[0]].load()
+    return _XCACHE[key]
+
+
+def with_extras(full_data):
+    """Append the shared extra typical fields (if TST_DECOY_EXTRA is set)."""
+    sp = extra_spec()
+    if sp is None:
+        return full_data
+    d, draw, n = sp
+    dims = [k for k in full_data.dims if k != "var"]
+    parts = [full_data]
+    for j in range(1, n + 1):
+        a = _load_extra(d, draw, j).transpose(*dims)
+        a = a.assign_coords({k: full_data[k] for k in dims}).astype(full_data.dtype).expand_dims(var=[f"X{j:02d}"])
+        parts.append(a.reset_coords(drop=True))
+    return xr.concat(parts, dim="var").transpose(*full_data.dims)

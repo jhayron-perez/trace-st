@@ -72,6 +72,8 @@ def main():
     ap.add_argument("--case", required=True, choices=["pnw", "pinatubo"])
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--n", type=int, default=30)
+    ap.add_argument("--extras", type=int, nargs=2, default=None, metavar=("DRAWS", "K"),
+                    help="night 9 S11: instead of the pool, write DRAWS x K independent typical fields <outdir>/draw<dd>/x_<jj>.nc (same calibration)")
     a = ap.parse_args()
     case, out = a.case, Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
@@ -96,6 +98,26 @@ def main():
     params, hist = G.calibrate(target, (nt, ny, nx), tmask, ones, ones, np.ones((ny, nx), bool), seed_for(case, 9000),
                                periodic, False, max_lag=ml, n_real=2, censor=True)
     print("calibrated", params, flush=True)
+    if a.extras:   # night 9 S11: independent extra typical fields per (draw, slot), seed BASE + 1e6 case + 500000 + 1000 draw + slot
+        nd, kk = a.extras
+        stats = []
+        for dd in range(nd):
+            (out / f"draw{dd:02d}").mkdir(parents=True, exist_ok=True)
+            for jj in range(1, kk + 1):
+                sd = int(BASE_SEED + 1000000 * CASE_IDX[case] + 500000 + 1000 * dd + jj)
+                u = G.unit_grf_ar1(nt, ny, nx, params["phi"], params["s_lat"], params["s_lon"], np.random.default_rng(sd),
+                                   periodic_lon=periodic, pad=(params["pad_lat"], params["pad_lon"]))
+                x = (u * np.sqrt(params["c"])).astype(np.float32)
+                if restd:
+                    x = G.standardize_time(x)
+                st = G.field_stats(x, None, None, ml, censor=True)[0]
+                stats.append(dict(draw=dd, slot=jj, seed=sd, **st))
+                xr.DataArray(np.transpose(x, np.argsort(order)).astype(np.float32), dims=dims, coords=coords, name=f"X{jj:02d}",
+                             attrs=dict(case=case, draw=dd, slot=jj, seed=sd)).to_netcdf(out / f"draw{dd:02d}" / f"x_{jj:02d}.nc")
+                del u, x
+        S = pd.DataFrame(stats); S.to_csv(out / "extras_seeds.csv", index=False)
+        print(S[["var", "r1", "L_lat", "L_lon"]].describe().loc[["mean", "std"]].to_string(), "targets", target, flush=True)
+        return
     rows = []
     for m in range(a.n):
         u = G.unit_grf_ar1(nt, ny, nx, params["phi"], params["s_lat"], params["s_lon"], np.random.default_rng(seed_for(case, m)),
