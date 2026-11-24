@@ -38,7 +38,7 @@ for r, case in enumerate(cases):
         ax[3].plot(g.K, g.added_max, ls, color="#999999", marker="s", ms=2.5, label=f"largest added field, {w} d")
     k = np.array(sorted(d.K.unique()))
     ax[3].plot(k, 1.0 / (k + len(S.VAR_COLORS) * 0 + (d.p.iloc[0] - d.K.iloc[0])), color="#0072B2", lw=0.8, ls=":", label="1/p")
-    ax[0].set_ylabel(f"{TITLE[case]}\nreal share (renormalized)")
+    ax[0].set_ylabel(f"{TITLE[case]}\nshare of all candidates\n(real + typical fields)")
     ax[1].set_ylabel(r"Kendall $\tau$ vs $K=1$"); ax[2].set_ylabel("fraction of runs"); ax[3].set_ylabel("share of all candidates")
     ax[1].set_ylim(-0.1, 1.05); ax[2].set_ylim(-0.03, 1.05)
     for a in ax:

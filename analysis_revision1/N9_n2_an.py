@@ -1,6 +1,6 @@
 """Night-9 N2 analysis (S11): performance vs number of typical fields K (K = 1 is the decoy run itself).
 Runs night9/n2/<case>_d<dd>/K<kk>_c<cfg> (K = 3..15, draws 0-2, 5 configs) + K = 1 from the decoy run (PNW/Pinatubo: night8/t1b;
-Debby: night9/n1). Per run: densities pooled over members (harmonized retention per run); per window: real shares renormalized among
+Debby: night9/n1). Per run: densities pooled over members (harmonized retention per run); per window: real shares as a share of ALL candidates (real + added typical fields; sums to 1 with the added fields; tau is rank-based, unchanged by the basis) -- earlier version: renormalized among
 the real variables, Kendall tau of the real shares vs the same config's K = 1 shares, leaders of the window (PNW 1-10 d Z500, TCWV;
 11-30 d OLR, SLHF, SSHF; Pinatubo 4-16 d SO2; Debby 1-4 and 5-15 d vo): 'outrank_any' = largest added field's share (of the total,
 added fields included) > the smallest leader's share, 'outrank_all' = > the largest leader's share; mean share per added field vs 1/p
@@ -78,7 +78,7 @@ def metrics(D, K, base_shares):
         lead = [real.index(v) for v in LEAD[case][(w0, w1)]]
         ls = Dw[lead] / tot
         tau = kendalltau(rs, base_shares[(w0, w1)])[0] if base_shares is not None else 1.0
-        res[(w0, w1)] = dict(real=rs, tau=float(tau) if np.isfinite(tau) else np.nan, outrank_any=bool(added.max() > ls.min()),
+        res[(w0, w1)] = dict(real=Dw[:nr] / tot, tau=float(tau) if np.isfinite(tau) else np.nan, outrank_any=bool(added.max() > ls.min()),
                              outrank_all=bool(added.max() > ls.max()), added_mean=float(added.mean()), added_max=float(added.max()),
                              over_1p=float(added.mean() * nv), added_sum=float(added.sum()))
     return res

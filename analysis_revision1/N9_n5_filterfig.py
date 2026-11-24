@@ -40,7 +40,7 @@ def main():
                            gridspec_kw=dict(width_ratios=[0.8, 1.2, 1.8]), squeeze=False)
     rng = np.random.default_rng(0)
     for r, c in enumerate(cases):
-        C = pd.read_csv(A8 / f"T1b_{c}_configs.csv" if c != "debby" else A9 / "N1_debby_configs.csv")
+        C = pd.read_csv(A9 / f"A0_{c}_allcand_configs.csv")
         C = C[C["decoy_share"].notna()]
         n, p = len(C), len(FINAL[c]) + 1
         a = ax[r, 0]
@@ -58,15 +58,15 @@ def main():
         d = ax[r, 2]
         w = WIN[c]
         sets = [("unf", "unfiltered", C), ("R1", "not rank 1", C[~C.R1_drop.astype(bool)]), ("R2", "equal share", C[~C.R2_drop.astype(bool)])]
-        for j, v in enumerate(FINAL[c]):
+        for j, v in enumerate(FINAL[c] + ["DECOY"]):
             for k, (key, lab, D) in enumerate(sets):
-                m, lo, hi_ = boot(D[f"s_{w}_{v}"], rng)
+                m, lo, hi_ = boot(D[f"s_{w}_{KEY.get(c, {}).get(v, v)}"], rng)
                 x = j + (k - 1) * 0.22
                 d.errorbar(x, m, yerr=[[m - lo], [hi_ - m]], fmt="o" if key == "unf" else ("^" if key == "R1" else "s"), ms=3, lw=0.8,
                            color=RCOL[key], label=f"{lab} (n={len(D)})" if j == 0 else None)
-        d.set_xticks(range(len(FINAL[c]))); d.set_xticklabels([S.lab(KEY.get(c, {}).get(v, v)) for v in FINAL[c]], rotation=40, ha="right")
-        d.set_ylabel(f"real-variable share, {w} d"); d.legend(loc="upper right" if c in ("pinatubo", "debby") else "upper left", fontsize=5.5)
-        if c == "debby": d.set_ylim(0, 0.52)
+        d.set_xticks(range(len(FINAL[c]) + 1)); d.set_xticklabels([S.lab(KEY.get(c, {}).get(v, v)) for v in FINAL[c]] + ["Decoy"], rotation=40, ha="right")
+        d.set_ylabel(f"share of all candidates, {w} d"); d.legend(loc="upper right" if c in ("pinatubo", "debby") else "upper left", fontsize=5.5)
+        if c == "debby": d.set_ylim(0, 0.45)
     for r in range(len(cases)):
         S.panel_labels([ax[r, 0], ax[r, 1], ax[r, 2]], start=3 * r)
     fig.tight_layout(w_pad=1.2, h_pad=1.5)

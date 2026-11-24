@@ -64,11 +64,15 @@ def main():
     W = pd.read_csv(R1 / "night6" / "analysis" / "T2_window_shares.csv")
     root = R1 / "figures_v9"
     if a.a0:
-        csv = R1 / "night8/analysis/T1b_pnw_configs.csv"
-        A = a_rows("pnw", csv, nofilter=True)
-        W2 = pd.concat([W[~((W["case"] == "pnw") & (W["set"] == "final") & (W["cfgset"] == "paired"))], A], ignore_index=True)
-        T2.fig_s12("pnw", W2, T2.CASES["pnw"], root); move("pnw", "A0")
-        print("pnw A0 configs:", int(A["n_cfg"].max()), flush=True)
+        # A0: final-set bars = share of ALL candidates (real + decoy) of the decoy runs, all harmonized-retained configs (window csvs of Figs 4-6 A0)
+        WF = dict(pnw="Fig6_pnw/fig6_pnw_final_A0_window_shares.csv", pinatubo="Fig5_pinatubo/fig5_pinatubo_final_A0_window_shares.csv",
+                  debby="Fig4_debby/fig4_debby_final_A0_window_shares.csv")
+        for case, rel in WF.items():
+            A = pd.read_csv(root / rel)
+            A = A[A["var"] != "DECOY"].copy(); A["set"] = "final"; A["cfgset"] = "paired"
+            W2 = pd.concat([W[~((W["case"] == case) & (W["set"] == "final") & (W["cfgset"] == "paired"))], A], ignore_index=True)
+            T2.fig_s12(case, W2, T2.CASES[case], root); move(case, "A0")
+            print(case, "A0 configs:", int(A["n_cfg"].max()), flush=True)
         return
     for case in ("debby", "pinatubo", "pnw"):
         T2.fig_s12(case, W, T2.CASES[case], root); move(case, "B")

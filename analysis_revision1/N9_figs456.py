@@ -127,10 +127,18 @@ def case_data_A(case, nproc):
 
 
 def lead_rows_A(case, D, roles):
-    """Panel-C table of framing A (real variables renormalized) and the decoy share per lead."""
+    """Panel-C table of framing A (real variables renormalized) and the decoy share per lead.
+    A0 (NOFILTER): every line is the share of ALL candidates (real + decoy, rows sum to 1); the decoy gets the same bootstrap CI."""
     real = D["vars"]
     nv = len(real)
     ids = D["ids"]
+    N5T2.WINDOWS = N6T2.WINDOWS
+    if NOFILTER:
+        Dall = {i: np.asarray(D["D_all"][i], float) for i in ids}
+        W, L, K = N5T2.stats_rows(case, "final", real + ["DECOY"], Dall, ids, dict(roles, DECOY="decoy"), "own")
+        L = pd.DataFrame(L); W = pd.DataFrame(W)
+        dec = L[L["var"] == "DECOY"][["lead", "share", "lo", "hi", "n_cfg"]].reset_index(drop=True)
+        return W, L[L["var"] != "DECOY"], dec
     Dreal = {i: D["D_all"][i][:, :nv] for i in ids}
     N5T2.WINDOWS = N6T2.WINDOWS
     W, L, K = N5T2.stats_rows(case, "final", real, Dreal, ids, roles, "own")
@@ -193,6 +201,9 @@ def make_fig(case, framing, D, L, root, decoy=None):
     n_cfg, xstats = F.panel_shares(axC, case, L, vars_, roles, None, "p95", None)
     if decoy is not None and len(decoy):
         axC.plot(decoy["lead"], decoy["share"], "--", color="0.35", lw=0.6, zorder=3.5)
+        if NOFILTER:
+            axC.fill_between(decoy["lead"], decoy["lo"], decoy["hi"], color="0.45", alpha=0.3, lw=0, zorder=3.4)
+            axC.set_ylabel("Share of all candidates")
         axC.set_ylim(0, max(axC.get_ylim()[1], float(decoy["share"].max()) * 1.08))
     lC = next(letters)
     F.title(axC, lC, "Relative contributions by lead" + (" (step 0 excl.)" if case == "pnw" else ""))
@@ -261,9 +272,9 @@ def make_fig(case, framing, D, L, root, decoy=None):
     if decoy is not None:
         decoy.to_csv(d / f"{name}_decoy_share.csv", index=False)
     if framing == "A":
-        desc = (f"framing A: final set + {'POOLED typical-field decoy pool (N4: realizations with randomly drawn statistics), ' if POOLED else 'typical-field decoy pool, '}harmonized retention ({len(D['ids_h'])} configs)" + ("; no configuration filtered by the control field (decoy), all retained configs shown" if NOFILTER else " then 'not rank 1' "
-                f"({len(D['ids'])} kept, {len(D['ids_h']) - len(D['ids'])} removed)") + f"; panel C real-variable shares renormalized among the real variables, "
-                f"thin grey line = decoy share of all candidates")
+        desc = (f"framing A{'0' if NOFILTER else ''}: final set + {'POOLED typical-field decoy pool (N4: realizations with randomly drawn statistics), ' if POOLED else 'typical-field decoy pool, '}harmonized retention ({len(D['ids_h'])} configs)" + ("; no configuration filtered by the control field (decoy), all retained configs shown" if NOFILTER else " then 'not rank 1' "
+                f"({len(D['ids'])} kept, {len(D['ids_h']) - len(D['ids'])} removed)") + (f"; panel C: every line is the share of ALL candidates (real variables + decoy), so the lines sum to 1; decoy = grey dashed line with its own 95 % CI band, " if NOFILTER else f"; panel C real-variable shares renormalized among the real variables, ")
+                + ("" if NOFILTER else "thin grey line = decoy share of all candidates"))
     else:
         desc = f"framing B: night-6 final-set runs without decoy, harmonized retention ({D['n_ret']} of {D['n_done']} configs)"
     cap = (f"{cfg['title']}, final variable set ({nv} variables), linear rule; {desc}. A: ensemble of config {eid}{ex_note}; marker colour = "
