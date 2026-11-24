@@ -21,6 +21,8 @@ def pool_file(pool_dir, member):
 def _load(pool_dir, member):
     key = (str(pool_dir), int(member))
     if key not in _CACHE:
+        if len(_CACHE) >= 2:   # memory: workers of a 30-member pool must not keep every realization
+            _CACHE.clear()
         with xr.open_dataset(pool_file(pool_dir, member)) as ds:
             name = list(ds.data_vars)[0]
             _CACHE[key] = ds[name].load()

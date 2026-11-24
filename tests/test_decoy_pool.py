@@ -81,7 +81,7 @@ class TestRunScripts(unittest.TestCase):
             np.testing.assert_array_equal(a[0].sel(var="DECOY").values, want)
 
     def test_flags_exist_default_none(self):
-        for s in ("8_HW_PNW21_Runs_v2.py", "6_PinatuboRuns.py"):
+        for s in ("8_HW_PNW21_Runs_v2.py", "6_PinatuboRuns.py", "5_DebbyRuns.py"):
             m = load_script(s)
             sys.argv = ["x", "--outdir", "/tmp/x"]
             self.assertIsNone(m.parse_args().decoy_pool)
@@ -101,6 +101,34 @@ class TestRunScripts(unittest.TestCase):
         self.assertEqual(c2["decoy_pool"], "/some/dir")
         self.assertEqual(list(c2["var_names"]), m.PINATUBO_VAR_NAMES + ["DECOY"])
         np.testing.assert_array_equal(c2["full_data"].values, c["full_data"].values)
+
+
+class TestDebby(unittest.TestCase):
+    """Night 9 N1: Debby --decoy-pool (TST_DEBBY_DECOY, run_ensemble / run_member_task append realization m)."""
+
+    def test_run_ensemble_default_and_decoy(self):
+        m = load_script("5_DebbyRuns.py")
+        fd = toy(nvar=3)
+        seen = []
+
+        def fake(full_data, p, date_end):
+            seen.append(full_data)
+            return np.zeros((2, 2)), np.ones(2, dtype=int), {}
+
+        with tempfile.TemporaryDirectory() as d:
+            write_pool(d, fd, n=3)
+            decoy._CACHE.clear()
+            case = dict(full_data=fd, event_lat=0.0, event_lon_0360=0.0, date_end="2000-01-05")
+            with mock.patch.object(m, "run_one_track", fake):
+                m.run_ensemble(case, dict(), M=3)
+                self.assertTrue(all(s is fd for s in seen))
+                seen.clear()
+                m.run_ensemble(dict(case, decoy_pool=d), dict(), M=3)
+            self.assertEqual([s.sizes["var"] for s in seen], [4, 4, 4])
+            for k, s in enumerate(seen):
+                self.assertEqual(str(s["var"].values[-1]), "DECOY")
+                np.testing.assert_array_equal(s.isel(var=slice(0, 3)).values, fd.values)
+                np.testing.assert_array_equal(s.sel(var="DECOY").values, decoy.with_decoy(fd, d, k).sel(var="DECOY").values)
 
 
 if __name__ == "__main__":

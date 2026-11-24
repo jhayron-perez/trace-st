@@ -60,7 +60,7 @@ def main():
             for j, v in enumerate(REAL):
                 rows.append(dict(set=sname, n_cfg=int(k.sum()), window=f"{w[0]}-{w[1]}", var=v, share=M[:, j].mean(), lo=ci[0, j], hi=ci[1, j],
                                  rank1=r1[:, j].mean(), rank1_lo=ci1[0, j], rank1_hi=ci1[1, j]))
-        if sname in ("unfiltered", "R2"):
+        if sname in ("unfiltered", "R1", "R2"):
             X = LS[k]
             for L in range(X.shape[1]):
                 ok = np.isfinite(X[:, L, :]).all(1)
@@ -83,8 +83,8 @@ def main():
             lines.append(f"| {v} | " + " | ".join(c) + " |")
     (T.OUT / "T1b_pnw_fulltable.md").write_text("\n".join(lines))
     FIG.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(1, 2, figsize=(11, 3.8), sharey=True)
-    for a_, sname, ttl in zip(ax, ("unfiltered", "R2"), (f"Unfiltered ({len(ids)} configs)", f"Equal-share filter ({int((~drop['R2']).sum())} configs kept)")):
+    fig, ax = plt.subplots(1, 3, figsize=(15.5, 3.8), sharey=True)
+    for a_, sname, ttl in zip(ax, ("unfiltered", "R1", "R2"), (f"Unfiltered ({len(ids)} configs)", f"Not-rank-1 filter ({int((~drop['R1']).sum())} configs kept)", f"Equal-share filter ({int((~drop['R2']).sum())} configs kept)")):
         for v in REAL:
             g = Ld[(Ld.set == sname) & (Ld["var"] == v)].sort_values("lead")
             a_.fill_between(g.lead, g.lo, g.hi, color=S.col(NAME[v]), alpha=0.22, lw=0)
@@ -92,7 +92,7 @@ def main():
         for (w0, w1), c in zip(WINS[:3], S.WINDOW_COLORS):
             a_.axvspan(w0 - 0.5, w1 + 0.5, color=c, alpha=0.07, lw=0)
         a_.set_xlim(0.5, 30.5); a_.set_ylim(0, None); a_.set_title(ttl, fontsize=9); a_.set_xlabel("Lead before the event (days)"); a_.grid(alpha=0.2, lw=0.4)
-    ax[0].set_ylabel("Share of trajectory density (real variables)"); ax[1].legend(fontsize=7, ncol=2)
+    ax[0].set_ylabel("Share of trajectory density (real variables)"); ax[2].legend(fontsize=7, ncol=2)
     fig.tight_layout()
     for ext in ("png", "pdf"):
         fig.savefig(FIG / f"T1b_pnw_shares_by_lead.{ext}", dpi=300)

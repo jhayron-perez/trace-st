@@ -247,7 +247,8 @@ def build_case_debby(extra_inputs=None, vo_input=None):
         params_base=params_base,
         event_lat=EVENT_LAT_DEBBY,
         event_lon_0360=EVENT_LON_DEBBY % 360.0,
-        var_names=list(full_data["var"].values),
+        var_names=list(full_data["var"].values) + (["DECOY"] if os.environ.get("TST_DEBBY_DECOY") else []),
+        **({"decoy_pool": os.environ["TST_DEBBY_DECOY"]} if os.environ.get("TST_DEBBY_DECOY") else {}),   # night 8 (opt-in): --decoy-pool
         observed_track=obs_track,
     )
 
@@ -397,7 +398,11 @@ def run_ensemble(case, params, M=30, seed=SEARCH_SEED):
         t0 = time.perf_counter()
 
         try:
-            centers, parents, out = run_one_track(case["full_data"], p, case["date_end"])
+            fd_m = case["full_data"]
+            if case.get("decoy_pool"):   # night 8 (opt-in): member m appends realization m
+                from trace_st import decoy as _decoy
+                fd_m = _decoy.with_decoy(fd_m, case["decoy_pool"], m)
+            centers, parents, out = run_one_track(fd_m, p, case["date_end"])
             ok = True
             err = ""
         except Exception as e:
@@ -454,7 +459,11 @@ def run_member_task(trial_id, params, m, member_seed):
     t0 = time.perf_counter()
 
     try:
-        centers, parents, out = run_one_track(case["full_data"], p, case["date_end"])
+        fd_m = case["full_data"]
+        if case.get("decoy_pool"):   # night 8 (opt-in): member m appends realization m
+            from trace_st import decoy as _decoy
+            fd_m = _decoy.with_decoy(fd_m, case["decoy_pool"], m)
+        centers, parents, out = run_one_track(fd_m, p, case["date_end"])
         ok = True
         err = ""
     except Exception as e:
@@ -1352,6 +1361,9 @@ def parse_args():
     parser.add_argument("--search-space", type=str, default="paper", choices=["paper", "common", "union"],
                         help="night 8 T1c (opt-in): 'common' draws lambda_a 10^U(-3,0) and l1_ratio 10^U(-4,0) "
                              "(one range for all cases); scale parameters unchanged")
+    parser.add_argument("--decoy-pool", type=str, default=None,
+                        help="night 8 (opt-in): directory with decoy_00.nc ... (typical-field pool on the analysis grid); member m "
+                             "appends realization m as the last candidate variable DECOY")
     parser.add_argument("--parallel-members", action="store_true",
                         help="night 6 (opt-in): the --n-workers pool runs ensemble members (same seeds, same ensembles) "
                              "instead of whole trials, so one trial finishes in minutes")
@@ -1362,6 +1374,8 @@ def main():
     args = parse_args()
     if args.system_path:
         os.environ["TST_DEBBY_SYSTEM_PATH"] = str(args.system_path)   # night 7: inherited by the pool workers
+    if args.decoy_pool:
+        os.environ["TST_DEBBY_DECOY"] = str(args.decoy_pool)   # night 8: inherited by the pool workers
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1404,6 +1418,7 @@ def main():
         "case_name": "debby",
         "seed": int(args.seed),
         **({"system_path": str(args.system_path)} if args.system_path else {}),
+        **({"decoy_pool": str(args.decoy_pool)} if args.decoy_pool else {}),
         "n_trials": int(args.n_trials),
         "n_workers": int(args.n_workers),
         "ensemble_size": int(args.ensemble_size),
