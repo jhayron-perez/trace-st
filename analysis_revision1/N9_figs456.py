@@ -73,10 +73,10 @@ def case_data_A(case, nproc):
         tab = pd.read_csv(d / "results_jobs_final.csv").assign(_dir=str(d))
         cf = pd.read_csv(R1 / "night8/analysis/T1b_pinatubo_configs.csv").set_index("id")
     else:   # debby: night 9 N1 (filled in by the N1 analysis)
-        parts = sorted((R1 / "night9" / "n1").glob("deb_p*"))
+        parts = sorted((R1 / "night9" / "n1").glob("deb_q[0-9]"))
         tabs = [pd.read_csv(p / ("results_jobs_final.csv" if (p / "results_jobs_final.csv").exists() else "results_jobs_snapshot.csv")).assign(_dir=str(p)) for p in parts]
         tab = pd.concat(tabs, ignore_index=True)
-        cf = pd.read_csv(OUTA / "N1_configs.csv").set_index("id")
+        cf = pd.read_csv(OUTA / "N1_debby_all.csv").set_index("id")
     keep_h = tab[retention.harmonized_case(case, tab)]
     ids_h = sorted(keep_h[idc].astype(int))
     assert set(ids_h) <= set(cf.index), "retained ids missing in the flag table"
@@ -92,6 +92,12 @@ def case_data_A(case, nproc):
         else:
             Dd = dict(pool.map(_pin_member_D, [(r.bundle_npz, r.box_size, nv, int(getattr(r, idc))) for r in kp.itertuples()])) \
                 if case == "pinatubo" else {}
+            if case == "debby":
+                import N6_T3T4 as _T
+                Dd = {}
+                for p in parts:
+                    Dp_, _ = _T.run_densities("debby", p, nv, True, nproc)
+                    Dd.update({int(k): np.asarray(v, float) for k, v in Dp_.items()})
             res = pool.map(F.map_bundle, [(r.bundle_npz, r.box_size, len(real)) for r in kp.itertuples()])
             out["H"] = np.sum([h for h, _, _ in res], axis=0)
             out["xs"], out["ys"] = res[0][1], res[0][2]
@@ -110,7 +116,7 @@ def case_data_A(case, nproc):
         out["example"] = [dict(centers=np.asarray(b["centers"][i, :int(b["lengths"][i])], float),
                                parents=np.asarray(b["parents"][i, :int(b["lengths"][i])], int))
                           for i in range(len(b["lengths"])) if int(b["ok"][i]) == 1 and int(b["lengths"][i]) > 0]
-        mem = pd.concat([pd.read_csv(Path(d) / "results_members_final.csv") for d in sorted(set(tab["_dir"]))], ignore_index=True)
+        mem = pd.concat([pd.read_csv(Path(d) / ("results_members_final.csv" if (Path(d) / "results_members_final.csv").exists() else "results_members_snapshot.csv")) for d in sorted(set(tab["_dir"]))], ignore_index=True)
         mcol = "track_dist_km_mean" if case == "debby" else "final_dist_to_volcano_km"
         sel = mem["trial_id"].isin(ids) & ((mem["ok"] == 1) if "ok" in mem else True)
         out["hist"] = mem.loc[sel, mcol].to_numpy(float)

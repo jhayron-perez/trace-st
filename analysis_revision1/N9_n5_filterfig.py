@@ -65,7 +65,8 @@ def main():
                 d.errorbar(x, m, yerr=[[m - lo], [hi_ - m]], fmt="o" if key == "unf" else ("^" if key == "R1" else "s"), ms=3, lw=0.8,
                            color=RCOL[key], label=f"{lab} (n={len(D)})" if j == 0 else None)
         d.set_xticks(range(len(FINAL[c]))); d.set_xticklabels([S.lab(KEY.get(c, {}).get(v, v)) for v in FINAL[c]], rotation=40, ha="right")
-        d.set_ylabel(f"real-variable share, {w} d"); d.legend(loc="upper right" if c == "pinatubo" else "upper left", fontsize=5.5)
+        d.set_ylabel(f"real-variable share, {w} d"); d.legend(loc="upper right" if c in ("pinatubo", "debby") else "upper left", fontsize=5.5)
+        if c == "debby": d.set_ylim(0, 0.52)
     for r in range(len(cases)):
         S.panel_labels([ax[r, 0], ax[r, 1], ax[r, 2]], start=3 * r)
     fig.tight_layout(w_pad=1.2, h_pad=1.5)
