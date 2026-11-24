@@ -42,6 +42,7 @@ FIGS = dict(debby=("Fig4_debby", "fig4_debby_final"), pinatubo=("Fig5_pinatubo",
 REAL = dict(debby=N6T2.CASES["debby"]["final"][1], pinatubo=N6T2.CASES["pinatubo"]["final"][1],
             pnw=N6T2.CASES["pnw"]["final"][1])
 import os as _os
+NOFILTER = bool(_os.environ.get("TST_A0"))   # A0: no configuration filtered by the decoy
 POOLED = bool(_os.environ.get("TST_POOLED"))   # N4 pooled-decoy PNW runs (night9/n4/pnw_pooled_p*, flags N4_pnw_configs.csv)
 T1B = R1 / ("night9/n4" if POOLED else "night8/t1b")
 
@@ -82,7 +83,7 @@ def case_data_A(case, nproc):
     keep_h = tab[retention.harmonized_case(case, tab)]
     ids_h = sorted(keep_h[idc].astype(int))
     assert set(ids_h) <= set(cf.index), "retained ids missing in the flag table"
-    ids = [i for i in ids_h if not bool(cf.loc[i, "R1_drop"])]
+    ids = ids_h if NOFILTER else [i for i in ids_h if not bool(cf.loc[i, "R1_drop"])]
     kp = keep_h[keep_h[idc].astype(int).isin(ids)]
     out = dict(tab=tab, ids=ids, ids_h=ids_h, vars=real)
     with Pool(nproc) as pool:
@@ -251,7 +252,7 @@ def make_fig(case, framing, D, L, root, decoy=None):
     cb.set_label("Integrated trajectory density (steps ≥ 1)", fontsize=6); cb.ax.tick_params(labelsize=5.5)
     cb.ax.xaxis.set_label_position("top")
     folder, name = FIGS[case]
-    name = f"{name}_{framing}" + ("_pooled" if POOLED and framing == "A" else "")
+    name = f"{name}_{framing}{'0' if NOFILTER and framing == 'A' else ''}" + ("_pooled" if POOLED and framing == "A" else "")
     d = root / folder; d.mkdir(parents=True, exist_ok=True)
     fig.savefig(d / f"{name}.pdf", bbox_inches="tight")
     fig.savefig(d / f"{name}.png", dpi=300, bbox_inches="tight")
@@ -260,8 +261,8 @@ def make_fig(case, framing, D, L, root, decoy=None):
     if decoy is not None:
         decoy.to_csv(d / f"{name}_decoy_share.csv", index=False)
     if framing == "A":
-        desc = (f"framing A: final set + {'POOLED typical-field decoy pool (N4: realizations with randomly drawn statistics), ' if POOLED else 'typical-field decoy pool, '}harmonized retention ({len(D['ids_h'])} configs) then 'not rank 1' "
-                f"({len(D['ids'])} kept, {len(D['ids_h']) - len(D['ids'])} removed); panel C real-variable shares renormalized among the real variables, "
+        desc = (f"framing A: final set + {'POOLED typical-field decoy pool (N4: realizations with randomly drawn statistics), ' if POOLED else 'typical-field decoy pool, '}harmonized retention ({len(D['ids_h'])} configs)" + ("; no configuration filtered by the control field (decoy), all retained configs shown" if NOFILTER else " then 'not rank 1' "
+                f"({len(D['ids'])} kept, {len(D['ids_h']) - len(D['ids'])} removed)") + f"; panel C real-variable shares renormalized among the real variables, "
                 f"thin grey line = decoy share of all candidates")
     else:
         desc = f"framing B: night-6 final-set runs without decoy, harmonized retention ({D['n_ret']} of {D['n_done']} configs)"
@@ -298,7 +299,7 @@ def main():
                 W, L, dec = lead_rows_A(case, D, cfg["roles"])
                 folder, name = FIGS[case]
                 (FIG9 / folder).mkdir(parents=True, exist_ok=True)
-                W.to_csv(FIG9 / folder / f"{name}_A{'_pooled' if POOLED else ''}_window_shares.csv", index=False)
+                W.to_csv(FIG9 / folder / f"{name}_A{'0' if NOFILTER else ''}{'_pooled' if POOLED else ''}_window_shares.csv", index=False)
                 out = make_fig(case, "A", D, L, FIG9, decoy=dec)
             print("fig", out, flush=True)
 

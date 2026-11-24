@@ -27,9 +27,9 @@ REAL = dict(pnw=["Z500", "Z10", "OLR", "TCWV", "SLHF", "SSHF", "T2m"],
 ROLES = {c: T2.CASES[c]["roles"] for c in T2.CASES}
 
 
-def a_rows(case, csv):
+def a_rows(case, csv, nofilter=False):
     d = pd.read_csv(csv).set_index("id")
-    if "R1_drop" in d:
+    if "R1_drop" in d and not nofilter:
         d = d[~d["R1_drop"].astype(bool)]
     d = d.dropna(subset=[c for c in d.columns if c.startswith("s_")][:1])
     rows = []
@@ -57,11 +57,19 @@ def move(case, tag):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--a0", action="store_true", help="A0: no configuration filtered by the decoy (harmonized retention only); PNW only, files *_A0")
     ap.add_argument("--debby-a", default=None, help="Debby N1 per-config csv (T1c-style columns s_<a>-<b>_<var>, R1_drop)")
     a = ap.parse_args()
     S.set_style()
     W = pd.read_csv(R1 / "night6" / "analysis" / "T2_window_shares.csv")
     root = R1 / "figures_v9"
+    if a.a0:
+        csv = R1 / "night8/analysis/T1b_pnw_configs.csv"
+        A = a_rows("pnw", csv, nofilter=True)
+        W2 = pd.concat([W[~((W["case"] == "pnw") & (W["set"] == "final") & (W["cfgset"] == "paired"))], A], ignore_index=True)
+        T2.fig_s12("pnw", W2, T2.CASES["pnw"], root); move("pnw", "A0")
+        print("pnw A0 configs:", int(A["n_cfg"].max()), flush=True)
+        return
     for case in ("debby", "pinatubo", "pnw"):
         T2.fig_s12(case, W, T2.CASES[case], root); move(case, "B")
     srcs = dict(pnw=R1 / "night8/analysis/T1b_pnw_configs.csv", pinatubo=R1 / "night8/analysis/T1b_pinatubo_configs.csv")
