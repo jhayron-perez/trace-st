@@ -44,7 +44,7 @@ for r, case in enumerate(cases):
     for a in ax:
         a.set_xticks([1, 3, 6, 9, 12, 15]); a.set_xlabel("K (typical fields, incl. decoy)", fontsize=6)
     n = d[d.K > 1].groupby("K").runs_retained.first()
-    ax[1].set_title("retained runs/15: " + ", ".join(f"{int(v)}" for k_, v in n.items()), fontsize=5, pad=2)
+    ax[1].text(0.98, 0.03, "retained runs/15:\n" + ", ".join(f"{int(v)}" for k_, v in n.items()), transform=ax[1].transAxes, fontsize=4.8, ha="right", va="bottom")
     _unused = (
                )
     for a, loc in zip(ax, ("best", "lower left", "upper left", "upper right")):

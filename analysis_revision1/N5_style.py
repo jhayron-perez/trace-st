@@ -1,7 +1,7 @@
 """Night-5 figure style (paper-ready): one style for every figures_v5 figure.
 
 - Widths: single column 8.5 cm, double column 17.5 cm (SINGLE, DOUBLE in inches).
-- Fonts 7-8 pt (Arial/Helvetica fallback DejaVu Sans), line widths 1.0, panel labels a, b, c (bold, 9 pt).
+- Fonts 7-8 pt (Arial/Helvetica fallback DejaVu Sans), line widths 1.0, panel labels A., B., C. (bold, 7.5 pt).
 - Colour-blind-safe, no green: Okabe-Ito subset without green/yellow plus greys; one colour per variable (same
   colours as figures_v2-v4 for the paper variables), one hue per role. Lead-window colours are the paper's
   (9_AnalysisHW_Figs45_v2 contour_color_by_window: 1-10 d #c98245, 11-20 d #5a284d, 21-30 d #5f93d1).
@@ -69,10 +69,18 @@ def set_style():
     })
 
 
-def panel_labels(axes, x=-0.14, y=1.04, start=0):
+def panel_labels(axes, x=None, y=None, start=0):
+    """Manuscript convention (as Figs 4-6): bold uppercase letter + period, 7.5 pt, left-aligned at the top-left of the axes.
+    x, y are accepted for backward compatibility and ignored."""
     for i, ax in enumerate(axes):
-        ax.text(x, y, "abcdefghijklmnop"[start + i], transform=ax.transAxes, fontsize=9, fontweight="bold",
-                va="bottom", ha="left")
+        L = "ABCDEFGHIJKLMNOP"[start + i] + "."
+        t = ax.get_title("left") or ax.get_title("center") or ax.get_title("right")
+        if t:   # as in Figs 4-6: "A. title", bold, left-aligned (replaces a centred or right-aligned title)
+            ax.set_title("", loc="center"); ax.set_title("", loc="right")
+            ax.set_title(f"{L} {t}", loc="left", fontsize=7.5, fontweight="bold", pad=2)
+        else:
+            ax.annotate(L, xy=(0, 1), xycoords="axes fraction", xytext=(0, 2), textcoords="offset points",
+                        fontsize=7.5, fontweight="bold", va="bottom", ha="left", annotation_clip=False)
 
 
 FIG_ROOT = None   # None = FIG5 (default); set_output() sets it

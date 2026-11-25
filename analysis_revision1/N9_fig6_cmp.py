@@ -26,10 +26,8 @@ for a, T, dd, ttl in ((ax[0], A, dA, f"Typical-field decoy (T1b), {int(A.n_cfg.m
         a.plot(t.lead, t.share, color=c, lw=1.0, label=v)
         a.fill_between(t.lead, t.lo, t.hi, color=c, alpha=0.18, lw=0)
     a.plot(dd.lead, dd.share, color="0.4", lw=0.8, ls="--", label="Decoy (share of all)")
-    a.set_title(ttl, fontsize=7); a.set_xlabel("Lead (days)")
+    a.set_title(f"{'AB'[list(ax).index(a)]}. {ttl}", loc="left", fontsize=7.5, fontweight="bold", pad=2); a.set_xlabel("Lead (days)")
 ax[0].set_ylabel("Share of trajectory density"); ax[1].legend(fontsize=5.5, ncol=2, frameon=False, loc="upper right")
-for a, l in zip(ax, "ab"):
-    a.text(-0.02, 1.08, l, transform=a.transAxes, fontsize=9, fontweight="bold")
 fig.tight_layout()
 fig.savefig(D / "fig6_pnw_A_typical_vs_pooled.pdf", bbox_inches="tight"); fig.savefig(D / "fig6_pnw_A_typical_vs_pooled.png", dpi=300, bbox_inches="tight")
 m = A.merge(P, on=["lead", "var"], suffixes=("_typical", "_pooled"))[["lead", "var", "n_cfg_typical", "share_typical", "lo_typical", "hi_typical", "n_cfg_pooled", "share_pooled", "lo_pooled", "hi_pooled"]]
